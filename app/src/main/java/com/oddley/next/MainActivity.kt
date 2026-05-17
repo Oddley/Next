@@ -4,44 +4,38 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.getValue
+import com.oddley.next.app.NextApplication
+import com.oddley.next.ui.ListScreen
+import com.oddley.next.ui.ListViewModel
 import com.oddley.next.ui.theme.NextTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val repository = (application as NextApplication).taskRepository
+        val viewModel = ViewModelProvider(
+            this,
+            ListViewModel.Factory(repository),
+        )[ListViewModel::class.java]
+
         enableEdgeToEdge()
         setContent {
             NextTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                ListScreen(
+                    uiState = uiState,
+                    onAddTask = viewModel::addTask,
+                    onCrossOff = viewModel::crossOff,
+                    onRestore = viewModel::restore,
+                    onEditText = viewModel::editText,
+                    onReorder = viewModel::reorder,
+                    onBulkDeleteCrossedOff = viewModel::bulkDeleteCrossedOff,
+                )
             }
         }
-    }
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    NextTheme {
-        Greeting("Android")
     }
 }
