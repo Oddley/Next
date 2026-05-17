@@ -15,20 +15,19 @@ This guide gets you from a base Windows 11 install to a working Android developm
 
 ---
 
-## Step 1 — Install JDK 21
+## Step 1 — Install JDK
 
 Android Studio bundles a JDK internally, but you need one on your `PATH` for command-line Gradle runs (TDD workflow per ADR-003).
 
-1. Go to **https://adoptium.net/temurin/releases/?version=21**
-2. Download the **Windows x64 `.msi`** installer (Eclipse Temurin 21 LTS)
-3. Run the installer. On the "Custom Setup" screen, ensure these features are enabled:
+1. Go to **https://adoptium.net/temurin/releases/** and download the latest LTS release for Windows x64 (`.msi` installer)
+2. Run the installer. On the "Custom Setup" screen, ensure these features are enabled:
    - **Add to PATH**
    - **Set JAVA_HOME variable**
-4. Complete the install, then open a **new** PowerShell window and verify:
+3. Complete the install, then open a **new** PowerShell window and verify:
    ```
    java -version
    ```
-   Expected output: `openjdk version "21.x.x" ...`
+   Expected output: any `openjdk version "21"` or later
 
 ---
 
@@ -94,13 +93,34 @@ After rebooting, the emulator will use WHPX acceleration automatically.
 
 ---
 
-## Step 5 — Create an Android Virtual Device (AVD)
+## Step 5 — Set up a test device
 
-1. In Android Studio, open **Device Manager** (right sidebar or View → Tool Windows → Device Manager)
-2. Click **Create Virtual Device**
-3. Choose a phone profile — **Pixel 8** or **Pixel 9** is recommended
-4. Select a system image: **API 36 (Android 16)**, x86_64 — download it if not already present (API 35 also works)
-5. Finish the wizard; the AVD will appear in Device Manager
+**Option A: Physical device (recommended for this project)**
+
+This app's primary surface is a persistent notification, which behaves more realistically on a real device. If your Android phone is running Android 11 or later, wireless debugging is the cleanest setup — no cable needed after initial pairing.
+
+On your phone:
+1. Go to **Settings → About Phone** and tap **Build Number** 7 times to enable Developer Mode
+2. Go to **Settings → Developer Options** and enable **Wireless Debugging**
+3. Tap **Wireless Debugging** to open it, then tap **Pair device with QR code**
+
+In Android Studio:
+1. Open the run target dropdown in the toolbar (where it says "No Device" or similar)
+2. Select **Pair Devices Using Wi-Fi**
+3. Scan the QR code shown on your phone
+4. Your device will appear in the device list and stay connected over Wi-Fi
+
+---
+
+**Option B: Android Virtual Device (emulator)**
+
+*Only needed if you don't have a physical Android device.*
+
+In Android Studio Panda the Device Manager moved. To find it:
+- **From the welcome screen:** More Actions → Virtual Device Manager
+- **From inside a project:** View → Tool Windows → Device Manager
+
+Once open, click **+** → **Create Virtual Device**, choose a phone profile (any Pixel), select an **API 36** x86_64 system image, and finish the wizard. Make sure you completed Step 3a (Windows Hypervisor Platform) first or the emulator won't start.
 
 ---
 
@@ -109,8 +129,8 @@ After rebooting, the emulator will use WHPX acceleration automatically.
 Open a fresh PowerShell window and run:
 
 ```powershell
-java -version          # should show openjdk 21
-adb --version          # should show Android Debug Bridge version 1.x.x
+java -version          # openjdk 21 or later
+adb --version          # Android Debug Bridge version 1.0.41 or later
 ```
 
 Then in Android Studio:
