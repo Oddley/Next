@@ -52,16 +52,31 @@ Android Studio is installed but the SDK has not been downloaded yet.
 In Android Studio, open **SDK Manager** (the toolbar icon, or via Settings → Languages & Frameworks → Android SDK).
 
 **SDK Platforms tab** — ensure these are installed:
-- Android 15.0 (API 35) — this is the project's `targetSdk`
-- Android 14.0 (API 34) — useful for testing on older emulators
+- Android 16.0 (API 36) — latest stable, default selection
+- Android 15.0 (API 35) — the project's declared `targetSdk`
 
 **SDK Tools tab** — ensure these are installed:
-- Android SDK Build-Tools 35.x (latest)
+- Android SDK Build-Tools 37.x (latest, default selection)
 - Android Emulator
 - Android SDK Platform-Tools
-- Intel x86 Emulator Accelerator (HAXM) — or it may show as "Android Emulator hypervisor driver", accept whichever is offered
+
+**Hypervisor note (AMD CPUs):** Do **not** install "Android Emulator Hypervisor Driver for AMD Processors" from the SDK Tools tab — it's broken and will error on install. AMD emulator acceleration on Windows uses the built-in **Windows Hypervisor Platform** instead; see Step 3a below.
 
 Click **Apply** and let everything download.
+
+---
+
+## Step 3a — Enable Windows Hypervisor Platform (AMD CPUs only)
+
+*Skip this step if you have an Intel CPU — HAXM (installed via SDK Manager) handles acceleration for Intel.*
+
+The Android Emulator on AMD processors uses **WHPX** (Windows Hypervisor Platform), a built-in Windows feature.
+
+1. Open **Start → "Turn Windows features on or off"**
+2. Scroll down and check **Windows Hypervisor Platform**
+3. Click OK and **reboot**
+
+After rebooting, the emulator will use WHPX acceleration automatically.
 
 ---
 
@@ -84,7 +99,7 @@ Click **Apply** and let everything download.
 1. In Android Studio, open **Device Manager** (right sidebar or View → Tool Windows → Device Manager)
 2. Click **Create Virtual Device**
 3. Choose a phone profile — **Pixel 8** or **Pixel 9** is recommended
-4. Select a system image: **API 35 (Android 15)**, x86_64 — download it if not already present
+4. Select a system image: **API 36 (Android 16)**, x86_64 — download it if not already present (API 35 also works)
 5. Finish the wizard; the AVD will appear in Device Manager
 
 ---
