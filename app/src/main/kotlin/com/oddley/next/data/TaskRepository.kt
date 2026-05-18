@@ -30,6 +30,9 @@ class TaskRepository(private val dao: TaskDao) {
         entities.map { it.toDomain() }
     }
 
+    /** One-shot snapshot of the full task list (for notification receivers). */
+    suspend fun tasksOnce(): List<Task> = dao.getAllOnce().map { it.toDomain() }
+
     // ── Mutations ─────────────────────────────────────────────────────────────
 
     suspend fun addTask(text: String) {
@@ -70,9 +73,12 @@ class TaskRepository(private val dao: TaskDao) {
         val current = dao.getAllOnce().map { it.toDomain() }
         val updated = reorder(current, fromIndex, toIndex)
         // Reorder can change order values of many tasks — update all that changed.
-        val changedIds = current.zip(updated)
-            .filter { (a, b) -> a.order != b.order }
-            .map { (_, b) -> b }
+        // Compare by id, not by position: zip() would pair tasks from different positions
+        // (current has no ORDER BY, updated is sorted active-then-crossed) and would
+        // always see identical order values even when tasks actually moved.
+        val changedIds = updated.filter { updatedTask ->
+            current.first { it.id == updatedTask.id }.order != updatedTask.order
+        }
         dao.updateAll(changedIds.map { it.toEntity() })
     }
 
