@@ -27,7 +27,7 @@ Three phases, each producing a feature-complete deliverable installable on foste
 
 ---
 
-## Phase 1 — List, Cross-off, Reorder, Persistence
+## Phase 1 — List, Cross-off, Reorder, Persistence ✓ COMPLETE
 
 **Deliverable:** Installable app on foster mama's phone with a working in-app list view. Add tasks, edit them, reorder via drag handle, cross off / restore, delete all crossed off. Data persists across app launches.
 
@@ -60,7 +60,7 @@ Three phases, each producing a feature-complete deliverable installable on foste
 
 ---
 
-## Phase 2 — Foreground Notification + Snooze
+## Phase 2 — Foreground Notification + Snooze ✓ COMPLETE
 
 **Deliverable:** Persistent notification shows the current top task and supports Mark complete + Snooze actions. The snooze mechanic from the spec works end-to-end.
 
@@ -95,7 +95,9 @@ Three phases, each producing a feature-complete deliverable installable on foste
 
 ---
 
-## Phase 3 — Drive Push/Pull
+## Phase 3 — Drive Push/Pull ~~(DEFERRED)~~
+
+> **Status: DEFERRED** — Drive sync is deprioritised indefinitely. The backup use-case may be revisited in a future phase, but is explicitly out of scope for active development.
 
 **Deliverable:** User can sign into Google Drive, push their current task state to a file, and pull a previously-pushed file back to replace local state.
 

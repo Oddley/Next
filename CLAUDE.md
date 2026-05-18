@@ -18,31 +18,75 @@ The defining mechanic is **snooze + offset**: she can push the top item(s) down 
 | Snooze data model | [ADR-008](docs/adr/008-snooze-data-model.md) |
 | Drive sync (manual push/pull) | [ADR-009](docs/adr/009-drive-sync-strategy.md) |
 
-## Directory Map (target structure once code lands)
+## Actual Directory Structure (as built — Phases 1 & 2 complete)
 
 ```
-app/
-  src/
-    main/
-      kotlin/com/oddley/next/
-        domain/        ← pure Kotlin, JVM-tested (snooze math, list ops)
-          [concept]/
-            CLAUDE.md  ← domain contract: inputs, outputs, invariants
-        data/          ← Room + Drive REST wrappers
-          CLAUDE.md
-        ui/            ← Compose screens + ViewModels
-          CLAUDE.md
-        notification/  ← foreground service + notification builders
-          CLAUDE.md
-        app/           ← Application class, DI wiring
-          CLAUDE.md
-      res/             ← Android resources
-      AndroidManifest.xml
-    test/              ← JVM unit tests (domain only per ADR-003)
+app/src/main/
+  kotlin/com/oddley/next/
+    domain/
+      task/
+        Task.kt               ← data class + NullTask + pure list ops
+        TaskOps.kt            ← activeTasks(), crossedOffTasks(), reorder(), etc.
+        CLAUDE.md
+      snooze/
+        SnoozeSession.kt      ← data class + NullSnoozeSession sentinel
+        SnoozeOps.kt          ← computeCurrentTop(), applySnooze(), applyMarkComplete()
+        CLAUDE.md
+    data/
+      TaskEntity.kt           ← Room entity + toDomain()/toEntity() mappers
+      TaskDao.kt
+      SnoozeSessionEntity.kt  ← Room entity (singleton row, id=1)
+      SnoozeDao.kt
+      NextDatabase.kt         ← Room DB v2, MIGRATION_1_2
+      TaskRepository.kt       ← exposes Flow<List<Task>>, reorder (id-based diff)
+      SnoozeRepository.kt     ← exposes Flow<SnoozeSession>, snooze(), markComplete(), clear()
+      CLAUDE.md
+    ui/
+      ListViewModel.kt        ← combine(tasks, session) → ListUiState
+                                 DisplayTask(task, isSnoozed) for display ordering
+                                 computeDisplayTasks(): [top, 💤snoozed..., remaining...]
+      ListScreen.kt           ← stateless Compose; drag state held locally (draggedItems)
+                                 to avoid Room round-trips per move
+      CLAUDE.md
+    notification/
+      TopTaskService.kt       ← foreground service; observing flag prevents double-start;
+                                 lastNotification re-posted on dismiss to re-anchor
+      MarkCompleteReceiver.kt
+      SnoozeReceiver.kt
+      BootReceiver.kt         ← restarts service after reboot
+      NotificationDismissedReceiver.kt ← re-anchors when user swipes (Android 13+)
+      CLAUDE.md
+    app/
+      NextApplication.kt      ← manual DI root; taskRepository + snoozeRepository lazy
+      CLAUDE.md
+  res/
+    drawable/
+      ic_launcher_background.xml   ← solid #7BD7FF (light blue)
+      ic_launcher_foreground.xml   ← 108dp adaptive icon foreground (72dp safe zone)
+      ic_notification.xml          ← 24dp white silhouette for status bar
+    mipmap-anydpi/
+      ic_launcher.xml              ← adaptive-icon + monochrome (API 33+ themed icons)
+      ic_launcher_round.xml
+    mipmap-anydpi-v26/
+      ic_launcher.xml              ← adaptive-icon (API 26+)
+      ic_launcher_round.xml
+    mipmap-{hdpi,mdpi,xhdpi,xxhdpi,xxxhdpi}/
+      ic_launcher.webp             ← legacy fallback bitmaps (unchanged from template)
+      ic_launcher_round.webp
+  AndroidManifest.xml
+app/src/test/
+  kotlin/com/oddley/next/domain/snooze/
+    SnoozeOpsTest.kt          ← 12 tests, covers full ADR-008 state-transition matrix
+logo/
+  check.svg                   ← source artwork (Affinity Designer export)
+  gen_icons.py                ← regenerates all Android icon XML from check.svg
+                                 (flattens shear matrix transforms into path coords,
+                                  scales to 72dp safe zone, outputs 5 XML files)
 docs/
-  spec.md              ← feature spec
-  plan.md              ← phased implementation
-  adr/                 ← one file per architectural decision
+  spec.md
+  plan.md                     ← Phases 1 & 2 marked COMPLETE; Phase 3 DEFERRED
+  adr/001-009
+  setup.md
 ```
 
 ## Key Invariants (override everything else)
@@ -54,8 +98,38 @@ docs/
 5. **Red before green.** No domain feature code without a failing test first.
 6. **The notification is the app's main interface.** The full list view is for editing; the notification is the daily-driver surface. If a feature lives only in the list view, foster mama may never see it.
 
+## Gotchas Learned in Implementation
+
+### Drag-and-drop
+- `sh.calvin.reorderable` 3.1.0: `draggableHandle` takes `onDragStarted: () -> Unit` (no `Offset` param — older versions had it).
+- Don't write to Room on every `onMove` — it causes the list to lurch. Keep a local `draggedItems: List<DisplayTask>?` snapshot and write once in `onDragStopped`.
+- `TaskRepository.reorder` must diff by **task ID**, not by list position. A position-based `zip` will always see equal order values if the sort is a permutation of the same set.
+
+### Display ordering with snooze offset
+- `ListUiState` carries **two** lists: `displayTasks: List<DisplayTask>` (display order, for rendering) and `activeTasks: List<Task>` (DB order, for index mapping in `onDragStopped`).
+- `computeDisplayTasks(activeTasks, session)`: when `offset = O` and `O < N`, display = `[activeTasks[O], activeTasks[0..O-1] (💤), activeTasks[O+1..]]`.
+- `onDragStopped` converts display index → underlying index before calling `onReorder`:
+  - `toDisplay == 0` → `underlying = O` (dropped at top slot)
+  - `1 ≤ toDisplay ≤ O` → `underlying = toDisplay - 1` (dropped in snoozed zone)
+  - `toDisplay > O` → `underlying = toDisplay` (dropped in remaining zone)
+
+### BasicTextField quirks
+- `singleLine = true` makes the keyboard show "Done" (✓). Use `maxLines = 1` instead and detect `'\n'` in `onValueChange` to commit — gives the ↵ key.
+- `onFocusChanged` fires with `isFocused = false` immediately on composition, before `requestFocus()` runs. Guard with an `editorFocused: Boolean` flag — only commit/exit when `editorFocused` was already `true`.
+- Use `TextFieldValue` (not `String`) to set `selection = TextRange(0, text.length)` for select-all on enter.
+
+### Notification channel
+- `IMPORTANCE_LOW` → "Silent" section (no badge, no sound, and visually demoted). Use `IMPORTANCE_DEFAULT` + `setSound(null, null)` + `enableVibration(false)` to land in "Alerting" without making noise.
+- Android ignores importance changes on existing channels. Bump the channel ID (we used `next_top_task_v2`) and delete the old one in `ensureChannel()`.
+- Android 13+ lets users swipe foreground-service notifications. Fix: set `deleteIntent` → `NotificationDismissedReceiver` → `TopTaskService.start()` → `onStartCommand` re-posts `lastNotification` via `startForeground()`. Guard with an `observing` flag so the Flow is only collected once.
+
+### Icon pipeline (`logo/gen_icons.py`)
+- The source SVG uses a general affine matrix with shear — Android `<vector>` `<group>` only supports translate/rotate/scale, **not** shear. The script bakes all transforms (outer translate + inner shear matrix) directly into the path coordinates.
+- Notification icon gap: the black outline in the colour icon is an evenOdd compound path (outer shell + inset inner shell). Re-use that same compound on the white notification paths — the inner subpath punches out the border zone, reproducing the gap without extra geometry.
+- To regenerate all icons: `cd logo && python gen_icons.py`
+
 ## What this app is NOT
 
-- **Not a sync tool.** Drive is a manual export/import for backup + device transfer. No conflict resolution, no live sync, no multi-user. One person, one device at a time.
+- **Not a sync tool.** Drive sync is DEFERRED indefinitely (Phase 3). One person, one device.
 - **Not a calendar.** No due dates, no reminders, no time-of-day. Just an ordered list with snooze.
 - **Not a project management tool.** No categories, tags, subtasks, dependencies. Single flat list.
