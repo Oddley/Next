@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Foreground service (needed on all versions) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- dataSync type required for foreground service on Android 14+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Notification permission required on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Boot receiver: restart service after reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".app.NextApplication"
         android:allowBackup="true"
@@ -12,6 +21,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Next">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -19,10 +29,52 @@
             android:theme="@style/Theme.Next">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Foreground service: shows the persistent current-top-task notification -->
+        <service
+            android:name=".notification.TopTaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Notification action: Mark complete -->
+        <receiver
+            android:name=".notification.MarkCompleteReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.oddley.next.MARK_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Notification action: Snooze -->
+        <receiver
+            android:name=".notification.SnoozeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.oddley.next.SNOOZE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Boot receiver: restart service after device reboot -->
+        <receiver
+            android:name=".notification.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Re-anchors notification when user swipes it away (Android 13+) -->
+        <receiver
+            android:name=".notification.NotificationDismissedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.oddley.next.NOTIFICATION_DISMISSED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

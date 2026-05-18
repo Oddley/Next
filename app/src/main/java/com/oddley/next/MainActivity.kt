@@ -1,26 +1,41 @@
 package com.oddley.next
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.getValue
 import com.oddley.next.app.NextApplication
+import com.oddley.next.notification.TopTaskService
 import com.oddley.next.ui.ListScreen
 import com.oddley.next.ui.ListViewModel
 import com.oddley.next.ui.theme.NextTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* permission result — service starts regardless; notification appears if granted */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val repository = (application as NextApplication).taskRepository
+        val app = application as NextApplication
         val viewModel = ViewModelProvider(
             this,
-            ListViewModel.Factory(repository),
+            ListViewModel.Factory(app.taskRepository, app.snoozeRepository),
         )[ListViewModel::class.java]
+
+        // Request POST_NOTIFICATIONS on Android 13+ then start the foreground service
+        requestNotificationPermissionIfNeeded()
+        TopTaskService.start(this)
 
         enableEdgeToEdge()
         setContent {
@@ -34,8 +49,19 @@ class MainActivity : ComponentActivity() {
                     onEditText = viewModel::editText,
                     onReorder = viewModel::reorder,
                     onBulkDeleteCrossedOff = viewModel::bulkDeleteCrossedOff,
+                    onClearSnooze = viewModel::clearSnooze,
                 )
             }
         }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) return
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
