@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -104,20 +105,18 @@ private fun TaskList(
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
 ) {
-    // Reorderable state — tied to the active task list
-    val reorderState = rememberReorderableLazyListState(
-        lazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
-        onMove = { from, to ->
-            // Adjust indices: LazyColumn keys include section headers, so we
-            // calculate the offset from the "To do" header item.
-            val headerOffset = 1 // "To do" header is index 0
-            onReorder(from.index - headerOffset, to.index - headerOffset)
-        },
-    )
+    // In 3.x the lazyListState is created separately and passed into the
+    // reorderable state. LazyColumn receives it directly (not via .lazyListState).
+    val lazyListState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        // from/to indices are LazyColumn indices (include the section header at 0)
+        val headerOffset = 1 // "To do" header occupies index 0
+        onReorder(from.index - headerOffset, to.index - headerOffset)
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        state = reorderState.lazyListState,
+        state = lazyListState,
     ) {
         // ── To do section ─────────────────────────────────────────────────────
         item(key = "header_todo") {

@@ -41,6 +41,10 @@ android {
     testOptions {
         unitTests.all { it.useJUnitPlatform() }
     }
+    // Room schema export location (required when exportSchema = true)
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 dependencies {
@@ -59,6 +63,12 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
 
+    // Lifecycle
+    implementation(libs.androidx.lifecycle.runtime.compose)
+
+    // Material Icons Extended (Add, Check, DragHandle, etc.)
+    implementation(libs.androidx.compose.material.icons.extended)
+
     // Drag-and-drop reorder for LazyColumn
     implementation(libs.reorderable)
 
@@ -69,6 +79,8 @@ dependencies {
 
     // JVM unit tests — JUnit 5 (Jupiter)
     testImplementation(libs.junit.jupiter)
+    // Gradle 9.x needs the Platform Launcher explicitly on the runtime classpath
+    testRuntimeOnly(libs.junit.platform.launcher)
 
     // Instrumented tests
     androidTestImplementation(platform(libs.androidx.compose.bom))
