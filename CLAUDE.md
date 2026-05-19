@@ -79,9 +79,17 @@ app/src/test/
     SnoozeOpsTest.kt          ← 12 tests, covers full ADR-008 state-transition matrix
 logo/
   check.svg                   ← source artwork (Affinity Designer export)
+  check.af                    ← Affinity Designer source file
   gen_icons.py                ← regenerates all Android icon XML from check.svg
                                  (flattens shear matrix transforms into path coords,
                                   scales to 72dp safe zone, outputs 5 XML files)
+app/
+  release-notes.txt           ← edit before each Firebase distribution; script refuses
+                                 to run if this is empty
+scripts/
+  distribute.ps1              ← builds debug APK + uploads to Firebase App Distribution
+                                 reads firebase.appId and firebase.testers from
+                                 local.properties (gitignored)
 docs/
   spec.md
   plan.md                     ← Phases 1 & 2 marked COMPLETE; Phase 3 DEFERRED
@@ -122,6 +130,19 @@ docs/
 - `IMPORTANCE_LOW` → "Silent" section (no badge, no sound, and visually demoted). Use `IMPORTANCE_DEFAULT` + `setSound(null, null)` + `enableVibration(false)` to land in "Alerting" without making noise.
 - Android ignores importance changes on existing channels. Bump the channel ID (we used `next_top_task_v2`) and delete the old one in `ensureChannel()`.
 - Android 13+ lets users swipe foreground-service notifications. Fix: set `deleteIntent` → `NotificationDismissedReceiver` → `TopTaskService.start()` → `onStartCommand` re-posts `lastNotification` via `startForeground()`. Guard with an `observing` flag so the Flow is only collected once.
+
+### Firebase App Distribution
+- Use the **Firebase CLI**, not the Gradle plugin. `firebase-appdistribution-gradle` 5.0.0
+  expects AGP's legacy `AppExtension` which was removed in AGP 9.x — it hard-crashes at
+  sync time. The CLI (`firebase appdistribution:distribute ...`) has no such dependency.
+- Private config lives in `local.properties` (already gitignored):
+  `firebase.appId` and `firebase.testers` (Elly's email).
+- Firebase project: `next-for-elly`
+  (console.firebase.google.com/project/next-for-elly/appdistribution)
+- Workflow: edit `app/release-notes.txt`, then run `.\scripts\distribute.ps1`.
+  The script validates config, builds the APK, and uploads in one shot.
+- First build was successfully distributed. Elly uses the **Firebase App Tester** app
+  on her phone to receive and install new builds.
 
 ### Icon pipeline (`logo/gen_icons.py`)
 - The source SVG uses a general affine matrix with shear — Android `<vector>` `<group>` only supports translate/rotate/scale, **not** shear. The script bakes all transforms (outer translate + inner shear matrix) directly into the path coordinates.
