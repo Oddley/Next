@@ -100,3 +100,27 @@ fun reorder(tasks: List<Task>, fromIndex: Int, toIndex: Int): List<Task> {
  */
 fun bulkDeleteCrossedOff(tasks: List<Task>): List<Task> =
     tasks.filter { !it.crossedOff }
+
+// ── Snooze ────────────────────────────────────────────────────────────────────
+
+/** Duration of a single snooze tap in milliseconds (5 minutes). */
+const val SNOOZE_DURATION_MS = 5L * 60 * 1_000
+
+/**
+ * Returns the first non-snoozed active task — the "NEXT" task shown in the
+ * notification and the NEXT section header.
+ *
+ * A task is snoozed when [Task.snoozedUntil] is non-null AND greater than [now].
+ * Timestamps at or below [now] are treated as expired (not snoozed).
+ *
+ * Returns [NullTask] when there are no eligible tasks.
+ */
+fun computeNext(tasks: List<Task>, now: Long): Task =
+    activeTasks(tasks).firstOrNull { it.snoozedUntil == null || it.snoozedUntil <= now }
+        ?: NullTask
+
+/** Returns a copy of [task] with [snoozedUntil] set to [until] (epoch ms). */
+fun snoozeTask(task: Task, until: Long): Task = task.copy(snoozedUntil = until)
+
+/** Returns a copy of [task] with [snoozedUntil] cleared. */
+fun unsnoozeTask(task: Task): Task = task.copy(snoozedUntil = null)

@@ -31,8 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import com.oddley.next.domain.snooze.NullSnoozeSession
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,25 +61,12 @@ fun ListScreen(
     onEditText: (Long, String) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
-    onClearSnooze: () -> Unit,
 ) {
     var showAddRow by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Next") },
-                actions = {
-                    if (uiState.snoozeSession != NullSnoozeSession) {
-                        FilledTonalButton(
-                            onClick = onClearSnooze,
-                            modifier = Modifier.padding(end = 8.dp),
-                        ) {
-                            Text("Clear snooze")
-                        }
-                    }
-                },
-            )
+            TopAppBar(title = { Text("Next") })
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showAddRow = true }) {
@@ -105,7 +90,6 @@ fun ListScreen(
             onEditText = onEditText,
             onReorder = onReorder,
             onBulkDeleteCrossedOff = onBulkDeleteCrossedOff,
-            onClearSnooze = onClearSnooze,
         )
     }
 }
@@ -122,15 +106,14 @@ private fun TaskList(
     onEditText: (Long, String) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
-    onClearSnooze: () -> Unit,
 ) {
     val lazyListState = rememberLazyListState()
 
     // Local drag state — update visually on every onMove, write to DB only when drag stops.
     // This prevents Room round-trips during the drag gesture (which caused lurching).
     var draggingId by remember { mutableStateOf<Long?>(null) }
-    var draggedItems by remember { mutableStateOf<List<DisplayTask>?>(null) }
-    val displayedActiveTasks = draggedItems ?: uiState.displayTasks
+    var draggedItems by remember { mutableStateOf<List<Task>?>(null) }
+    val displayedActiveTasks = draggedItems ?: uiState.activeTasks
 
     // When the DB updates after the drag completes, clear the local snapshot so the
     // canonical Room order takes over again.
@@ -143,7 +126,7 @@ private fun TaskList(
         val headerOffset = 1 // "To do" header occupies index 0
         val fromIdx = from.index - headerOffset
         val toIdx = to.index - headerOffset
-        val current = (draggedItems ?: uiState.displayTasks).toMutableList()
+        val current = (draggedItems ?: uiState.activeTasks).toMutableList()
         if (fromIdx in current.indices && toIdx in current.indices) {
             current.add(toIdx, current.removeAt(fromIdx))
             draggedItems = current
@@ -161,49 +144,31 @@ private fun TaskList(
 
         itemsIndexed(
             items = displayedActiveTasks,
-            key = { _, displayTask -> displayTask.task.id },
-        ) { _, displayTask ->
-            ReorderableItem(reorderState, key = displayTask.task.id) { isDragging ->
+            key = { _, task -> task.id },
+        ) { _, task ->
+            ReorderableItem(reorderState, key = task.id) { isDragging ->
                 ActiveTaskRow(
-                    task = displayTask.task,
-                    isSnoozed = displayTask.isSnoozed,
+                    task = task,
                     isDragging = isDragging,
-                    onCrossOff = { onCrossOff(displayTask.task.id) },
-                    onEditText = { newText -> onEditText(displayTask.task.id, newText) },
+                    onCrossOff = { onCrossOff(task.id) },
+                    onEditText = { newText -> onEditText(task.id, newText) },
                     dragHandle = {
                         IconButton(
                             modifier = Modifier.draggableHandle(
                                 onDragStarted = {
-                                    // Snapshot which task is being dragged
-                                    draggingId = displayTask.task.id
+                                    draggingId = task.id
                                 },
                                 onDragStopped = {
-                                    // Convert display-space indices to underlying (DB) indices,
-                                    // then write once to the DB.
+                                    // Display order == underlying order (no snooze offset math).
                                     val id = draggingId
                                     val finalItems = draggedItems
                                     if (id != null && finalItems != null) {
-                                        val fromUnderlying = uiState.activeTasks.indexOfFirst { it.id == id }
-                                        val toDisplay = finalItems.indexOfFirst { it.task.id == id }
-                                        // Map display position → underlying position.
-                                        // With snooze offset O (0 < O < N):
-                                        //   display[0]   → underlying[O]        (top item)
-                                        //   display[1..O] → underlying[0..O-1]  (snoozed)
-                                        //   display[O+1..] → underlying[O+1..]  (remaining)
-                                        val O = uiState.snoozeSession.offset
-                                        val N = uiState.activeTasks.size
-                                        val toUnderlying = when {
-                                            O <= 0 || O >= N -> toDisplay
-                                            toDisplay == 0 -> O
-                                            toDisplay <= O -> toDisplay - 1
-                                            else -> toDisplay
-                                        }
-                                        if (fromUnderlying >= 0 && toUnderlying >= 0 && fromUnderlying != toUnderlying) {
-                                            onReorder(fromUnderlying, toUnderlying)
+                                        val fromIndex = uiState.activeTasks.indexOfFirst { it.id == id }
+                                        val toIndex = finalItems.indexOfFirst { it.id == id }
+                                        if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
+                                            onReorder(fromIndex, toIndex)
                                         }
                                     }
-                                    // Clear the in-progress marker; LaunchedEffect above will
-                                    // clear draggedItems once the DB update arrives.
                                     draggingId = null
                                 },
                             ),
@@ -255,12 +220,14 @@ private fun TaskList(
 @Composable
 private fun ActiveTaskRow(
     task: Task,
-    isSnoozed: Boolean,
     isDragging: Boolean,
     onCrossOff: () -> Unit,
     onEditText: (String) -> Unit,
     dragHandle: @Composable () -> Unit,
 ) {
+    val now = System.currentTimeMillis()
+    val isSnoozed = task.snoozedUntil != null && task.snoozedUntil > now
+
     var isEditing by remember { mutableStateOf(false) }
     var draftValue by remember(task.id) { mutableStateOf(TextFieldValue(task.text)) }
     // Guard: onFocusChanged fires with isFocused=false the instant BasicTextField is
@@ -385,7 +352,6 @@ private fun AddTaskRow(
             value = text,
             onValueChange = { newValue ->
                 if ('\n' in newValue) {
-                    // Return key pressed — confirm or dismiss
                     val trimmed = newValue.replace("\n", "")
                     if (trimmed.isNotBlank()) onConfirm(trimmed) else onDismiss()
                 } else {
@@ -396,12 +362,10 @@ private fun AddTaskRow(
                 .weight(1f)
                 .padding(vertical = 12.dp)
                 .focusRequester(focusRequester),
-            // Explicit color so dark-mode themes don't render invisible text
             textStyle = LocalTextStyle.current.copy(
                 color = MaterialTheme.colorScheme.onSurface,
             ),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-            // maxLines=1 keeps single-line visual but lets keyboard show ↵ (not ✓)
             maxLines = 1,
             decorationBox = { inner ->
                 Box {
@@ -417,7 +381,6 @@ private fun AddTaskRow(
                 }
             },
         )
-        // Return arrow (↵) — matches the keyboard's natural return key
         IconButton(onClick = { if (text.isNotBlank()) onConfirm(text) else onDismiss() }) {
             Icon(Icons.AutoMirrored.Filled.KeyboardReturn, contentDescription = "Confirm")
         }

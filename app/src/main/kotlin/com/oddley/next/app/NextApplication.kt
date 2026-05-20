@@ -2,7 +2,6 @@ package com.oddley.next.app
 
 import android.app.Application
 import com.oddley.next.data.NextDatabase
-import com.oddley.next.data.SnoozeRepository
 import com.oddley.next.data.TaskRepository
 import com.oddley.next.notification.TopTaskService
 
@@ -11,7 +10,7 @@ import com.oddley.next.notification.TopTaskService
  *
  * Usage from Activity / Service / Receiver:
  *   val app = context.applicationContext as NextApplication
- *   app.taskRepository / app.snoozeRepository
+ *   app.taskRepository
  */
 class NextApplication : Application() {
 
@@ -21,10 +20,6 @@ class NextApplication : Application() {
 
     val taskRepository: TaskRepository by lazy {
         TaskRepository(database.taskDao())
-    }
-
-    val snoozeRepository: SnoozeRepository by lazy {
-        SnoozeRepository(database.snoozeDao())
     }
 
     override fun onCreate() {

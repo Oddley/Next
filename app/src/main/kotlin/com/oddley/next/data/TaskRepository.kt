@@ -9,6 +9,8 @@ import com.oddley.next.domain.task.editText
 import com.oddley.next.domain.task.nextOrderForInsert
 import com.oddley.next.domain.task.reorder
 import com.oddley.next.domain.task.restore
+import com.oddley.next.domain.task.snoozeTask
+import com.oddley.next.domain.task.unsnoozeTask
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -84,5 +86,17 @@ class TaskRepository(private val dao: TaskDao) {
 
     suspend fun bulkDeleteCrossedOff() {
         dao.deleteAllCrossedOff()
+    }
+
+    /** Sets [snoozedUntil] on the task with [id]. No-op if id not found. */
+    suspend fun snoozeTask(id: Long, until: Long) {
+        val task = dao.getAllOnce().map { it.toDomain() }.firstOrNull { it.id == id } ?: return
+        dao.update(snoozeTask(task, until).toEntity())
+    }
+
+    /** Clears [snoozedUntil] on the task with [id]. No-op if id not found. */
+    suspend fun unsnoozeTask(id: Long) {
+        val task = dao.getAllOnce().map { it.toDomain() }.firstOrNull { it.id == id } ?: return
+        dao.update(unsnoozeTask(task).toEntity())
     }
 }

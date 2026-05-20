@@ -12,15 +12,13 @@ import androidx.core.app.NotificationCompat
 import com.oddley.next.MainActivity
 import com.oddley.next.R
 import com.oddley.next.app.NextApplication
-import com.oddley.next.domain.snooze.CurrentTop
-import com.oddley.next.domain.snooze.NullSnoozeSession
-import com.oddley.next.domain.snooze.SnoozeSession
-import com.oddley.next.domain.snooze.computeCurrentTop
+import com.oddley.next.domain.task.NullTask
+import com.oddley.next.domain.task.Task
+import com.oddley.next.domain.task.computeNext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -29,8 +27,10 @@ import kotlinx.coroutines.launch
  * Lifecycle:
  *   - Started from [MainActivity] on launch and from [BootReceiver] after reboot.
  *   - Runs indefinitely; [START_STICKY] causes restart after OS kills it.
- *   - Observes TaskRepository.tasks ⊕ SnoozeRepository.session; rebuilds the
- *     notification on every emission via [startForeground] to re-anchor it.
+ *   - Observes TaskRepository.tasks; rebuilds the notification on every emission
+ *     via [startForeground] to re-anchor it.
+ *
+ * NEXT task is computed by [computeNext] — the first non-snoozed active task.
  *
  * Swipe-to-dismiss (Android 13+):
  *   The platform allows foreground service notifications to be swiped away.
@@ -57,7 +57,7 @@ class TopTaskService : Service() {
         // immediately show the correct content with no flicker.
         startForeground(
             NOTIFICATION_ID,
-            lastNotification ?: buildNotification(this, CurrentTop.Empty, NullSnoozeSession),
+            lastNotification ?: buildNotification(this, NullTask),
         )
         if (!observing) {
             observing = true
@@ -76,11 +76,9 @@ class TopTaskService : Service() {
     private fun observeState() {
         val app = application as NextApplication
         scope.launch {
-            combine(app.taskRepository.tasks, app.snoozeRepository.session) { tasks, session ->
-                Pair(tasks, session)
-            }.collect { (tasks, session) ->
-                val top = computeCurrentTop(tasks, session, System.currentTimeMillis())
-                val notification = buildNotification(this@TopTaskService, top, session)
+            app.taskRepository.tasks.collect { tasks ->
+                val top = computeNext(tasks, System.currentTimeMillis())
+                val notification = buildNotification(this@TopTaskService, top)
                 lastNotification = notification
                 // Use startForeground (not just notify) so the notification stays
                 // bound to the foreground service declaration on every update.
@@ -123,17 +121,8 @@ class TopTaskService : Service() {
             nm.createNotificationChannel(channel)
         }
 
-        fun buildNotification(
-            context: Context,
-            top: CurrentTop,
-            session: SnoozeSession,
-        ): Notification {
-            val (title, isSnoozedFallback) = when (top) {
-                is CurrentTop.Real -> top.task.text to false
-                is CurrentTop.SnoozedFallback -> top.task.text to true
-                CurrentTop.Empty -> "All caught up 🎉" to false
-            }
-            val contentText = if (isSnoozedFallback) "↩ Showing top snoozed item" else null
+        fun buildNotification(context: Context, top: Task): Notification {
+            val title = if (top == NullTask) "All caught up 🎉" else top.text
 
             // Tap notification body → open app
             val openApp = PendingIntent.getActivity(
@@ -155,15 +144,13 @@ class TopTaskService : Service() {
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setOngoing(true)
-                .setOnlyAlertOnce(true)       // no heads-up on content updates
-                .setSilent(true)              // belt-and-suspenders: suppress any alert
+                .setOnlyAlertOnce(true)
+                .setSilent(true)
                 .setContentIntent(openApp)
                 .setDeleteIntent(deleteIntent)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
-            if (contentText != null) builder.setContentText(contentText)
-
-            if (top !is CurrentTop.Empty) {
+            if (top != NullTask) {
                 builder.addAction(0, "Mark complete", pendingBroadcast(context, ACTION_MARK_COMPLETE, 1))
                 builder.addAction(0, "Snooze", pendingBroadcast(context, ACTION_SNOOZE, 2))
             }

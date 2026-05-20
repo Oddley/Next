@@ -4,6 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.oddley.next.app.NextApplication
+import com.oddley.next.domain.task.NullTask
+import com.oddley.next.domain.task.SNOOZE_DURATION_MS
+import com.oddley.next.domain.task.computeNext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -11,9 +14,9 @@ import kotlinx.coroutines.launch
 /**
  * Handles the "Snooze" notification action.
  *
- * Delegates entirely to [SnoozeRepository.snooze]; the repository applies
- * the domain logic and persists the result. The service's Flow collector then
- * picks up the change and refreshes the notification automatically.
+ * Finds the current NEXT task via [computeNext] and sets its [Task.snoozedUntil]
+ * to now + [SNOOZE_DURATION_MS]. The service's Flow collector then picks up the
+ * change and refreshes the notification to show the new NEXT task automatically.
  */
 class SnoozeReceiver : BroadcastReceiver() {
 
@@ -24,7 +27,12 @@ class SnoozeReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                app.snoozeRepository.snooze(System.currentTimeMillis())
+                val now = System.currentTimeMillis()
+                val tasks = app.taskRepository.tasksOnce()
+                val top = computeNext(tasks, now)
+                if (top != NullTask) {
+                    app.taskRepository.snoozeTask(top.id, now + SNOOZE_DURATION_MS)
+                }
             } finally {
                 pendingResult.finish()
             }

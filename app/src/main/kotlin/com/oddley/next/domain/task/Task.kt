@@ -12,6 +12,10 @@ data class Task(
     val text: String,
     val order: Int,
     val crossedOff: Boolean,
+    /** Epoch ms after which this task is visible again. Null = not snoozed. */
+    val snoozedUntil: Long? = null,
+    /** FK to TaskEmitter that owns this task. Null = manual task. */
+    val emitterId: Long? = null,
 )
 
 /**

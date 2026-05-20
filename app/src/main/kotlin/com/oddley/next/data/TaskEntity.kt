@@ -16,6 +16,8 @@ data class TaskEntity(
     val text: String,
     val order: Int,
     val crossedOff: Boolean,
+    val snoozedUntil: Long? = null,
+    val emitterId: Long? = null,
 )
 
 // ── Conversion helpers ────────────────────────────────────────────────────────
@@ -25,6 +27,8 @@ fun TaskEntity.toDomain(): Task = Task(
     text = text,
     order = order,
     crossedOff = crossedOff,
+    snoozedUntil = snoozedUntil,
+    emitterId = emitterId,
 )
 
 fun Task.toEntity(): TaskEntity = TaskEntity(
@@ -32,4 +36,6 @@ fun Task.toEntity(): TaskEntity = TaskEntity(
     text = text,
     order = order,
     crossedOff = crossedOff,
+    snoozedUntil = snoozedUntil,
+    emitterId = emitterId,
 )
