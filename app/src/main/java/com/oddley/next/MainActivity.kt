@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         val app = application as NextApplication
         val viewModel = ViewModelProvider(
             this,
-            ListViewModel.Factory(app.taskRepository),
+            ListViewModel.Factory(app.taskRepository, app.uiPrefsRepository),
         )[ListViewModel::class.java]
 
         // Request POST_NOTIFICATIONS on Android 13+ then start the foreground service
@@ -49,6 +49,11 @@ class MainActivity : ComponentActivity() {
                     onEditText = viewModel::editText,
                     onReorder = viewModel::reorder,
                     onBulkDeleteCrossedOff = viewModel::bulkDeleteCrossedOff,
+                    onMarkComplete = viewModel::markComplete,
+                    onSnooze = viewModel::snooze,
+                    onToggleTasks = viewModel::toggleTasksExpanded,
+                    onToggleEmitters = viewModel::toggleEmittersExpanded,
+                    onToggleCompleted = viewModel::toggleCompletedExpanded,
                 )
             }
         }

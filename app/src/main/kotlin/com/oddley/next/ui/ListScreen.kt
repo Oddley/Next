@@ -1,5 +1,6 @@
 package com.oddley.next.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,21 +17,26 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +53,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.oddley.next.domain.task.NullTask
 import com.oddley.next.domain.task.Task
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -61,69 +68,66 @@ fun ListScreen(
     onEditText: (Long, String) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
+    onMarkComplete: () -> Unit,
+    onSnooze: () -> Unit,
+    onToggleTasks: () -> Unit,
+    onToggleEmitters: () -> Unit,
+    onToggleCompleted: () -> Unit,
 ) {
-    var showAddRow by remember { mutableStateOf(false) }
-
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Next") })
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddRow = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Add task")
-            }
-        },
+        topBar = { TopAppBar(title = { Text("Next") }) },
     ) { paddingValues ->
-        TaskList(
+        SectionedList(
             modifier = Modifier
                 .padding(paddingValues)
                 .imePadding(),
             uiState = uiState,
-            showAddRow = showAddRow,
-            onAddTask = { text ->
-                onAddTask(text)
-                showAddRow = false
-            },
-            onAddRowDismiss = { showAddRow = false },
+            onAddTask = onAddTask,
             onCrossOff = onCrossOff,
             onRestore = onRestore,
             onEditText = onEditText,
             onReorder = onReorder,
             onBulkDeleteCrossedOff = onBulkDeleteCrossedOff,
+            onMarkComplete = onMarkComplete,
+            onSnooze = onSnooze,
+            onToggleTasks = onToggleTasks,
+            onToggleEmitters = onToggleEmitters,
+            onToggleCompleted = onToggleCompleted,
         )
     }
 }
 
 @Composable
-private fun TaskList(
+private fun SectionedList(
     modifier: Modifier = Modifier,
     uiState: ListUiState,
-    showAddRow: Boolean,
     onAddTask: (String) -> Unit,
-    onAddRowDismiss: () -> Unit,
     onCrossOff: (Long) -> Unit,
     onRestore: (Long) -> Unit,
     onEditText: (Long, String) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
+    onMarkComplete: () -> Unit,
+    onSnooze: () -> Unit,
+    onToggleTasks: () -> Unit,
+    onToggleEmitters: () -> Unit,
+    onToggleCompleted: () -> Unit,
 ) {
     val lazyListState = rememberLazyListState()
+    var showAddRow by remember { mutableStateOf(false) }
 
-    // Local drag state — update visually on every onMove, write to DB only when drag stops.
-    // This prevents Room round-trips during the drag gesture (which caused lurching).
+    // Local drag state — write to DB only on drag stop to prevent lurching.
     var draggingId by remember { mutableStateOf<Long?>(null) }
     var draggedItems by remember { mutableStateOf<List<Task>?>(null) }
     val displayedActiveTasks = draggedItems ?: uiState.activeTasks
 
-    // When the DB updates after the drag completes, clear the local snapshot so the
-    // canonical Room order takes over again.
     LaunchedEffect(uiState.activeTasks) {
         if (draggingId == null) draggedItems = null
     }
 
+    // NEXT section (index 0) + Tasks header (index 1) = headerOffset 2
     val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // Reorder the local snapshot for smooth animation — no DB write here.
-        val headerOffset = 1 // "To do" header occupies index 0
+        val headerOffset = 2
         val fromIdx = from.index - headerOffset
         val toIdx = to.index - headerOffset
         val current = (draggedItems ?: uiState.activeTasks).toMutableList()
@@ -137,89 +141,274 @@ private fun TaskList(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
     ) {
-        // ── To do section ─────────────────────────────────────────────────────
-        item(key = "header_todo") {
-            SectionHeader(title = "To do")
+
+        // ── NEXT ─────────────────────────────────────────────────────────────
+        item(key = "next_section") {
+            NextSection(
+                nextTask = uiState.nextTask,
+                onMarkComplete = onMarkComplete,
+                onSnooze = onSnooze,
+            )
         }
 
-        itemsIndexed(
-            items = displayedActiveTasks,
-            key = { _, task -> task.id },
-        ) { _, task ->
-            ReorderableItem(reorderState, key = task.id) { isDragging ->
-                ActiveTaskRow(
-                    task = task,
-                    isDragging = isDragging,
-                    onCrossOff = { onCrossOff(task.id) },
-                    onEditText = { newText -> onEditText(task.id, newText) },
-                    dragHandle = {
-                        IconButton(
-                            modifier = Modifier.draggableHandle(
-                                onDragStarted = {
-                                    draggingId = task.id
-                                },
-                                onDragStopped = {
-                                    // Display order == underlying order (no snooze offset math).
-                                    val id = draggingId
-                                    val finalItems = draggedItems
-                                    if (id != null && finalItems != null) {
-                                        val fromIndex = uiState.activeTasks.indexOfFirst { it.id == id }
-                                        val toIndex = finalItems.indexOfFirst { it.id == id }
-                                        if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
-                                            onReorder(fromIndex, toIndex)
-                                        }
-                                    }
-                                    draggingId = null
-                                },
-                            ),
-                            onClick = {},
-                        ) {
-                            Icon(Icons.Default.DragHandle, contentDescription = "Drag to reorder")
-                        }
-                    },
+        // ── Tasks ─────────────────────────────────────────────────────────────
+        if (uiState.activeTasks.isEmpty()) {
+            item(key = "tasks_empty") {
+                EmptySectionLabel(label = "No Tasks")
+            }
+        } else {
+            item(key = "tasks_header") {
+                CollapsibleSectionHeader(
+                    title = "Tasks",
+                    count = uiState.activeTasks.size,
+                    expanded = uiState.tasksExpanded,
+                    onToggle = onToggleTasks,
                 )
+            }
+
+            if (uiState.tasksExpanded) {
+                itemsIndexed(
+                    items = displayedActiveTasks,
+                    key = { _, task -> task.id },
+                ) { _, task ->
+                    ReorderableItem(reorderState, key = task.id) { isDragging ->
+                        ActiveTaskRow(
+                            task = task,
+                            isNextTask = uiState.nextTask != NullTask &&
+                                    task.id == uiState.nextTask.id,
+                            isDragging = isDragging,
+                            onCrossOff = { onCrossOff(task.id) },
+                            onEditText = { newText -> onEditText(task.id, newText) },
+                            dragHandle = {
+                                IconButton(
+                                    modifier = Modifier.draggableHandle(
+                                        onDragStarted = { draggingId = task.id },
+                                        onDragStopped = {
+                                            val id = draggingId
+                                            val finalItems = draggedItems
+                                            if (id != null && finalItems != null) {
+                                                val fromIndex =
+                                                    uiState.activeTasks.indexOfFirst { it.id == id }
+                                                val toIndex =
+                                                    finalItems.indexOfFirst { it.id == id }
+                                                if (fromIndex >= 0 && toIndex >= 0 &&
+                                                    fromIndex != toIndex
+                                                ) {
+                                                    onReorder(fromIndex, toIndex)
+                                                }
+                                            }
+                                            draggingId = null
+                                        },
+                                    ),
+                                    onClick = {},
+                                ) {
+                                    Icon(
+                                        Icons.Default.DragHandle,
+                                        contentDescription = "Drag to reorder",
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
             }
         }
 
-        // Inline add row appears at the bottom of the To do section
+        // "Add New Task" footer — always visible so you can add even when collapsed
         if (showAddRow) {
-            item(key = "add_row") {
+            item(key = "add_task_row") {
                 AddTaskRow(
-                    onConfirm = onAddTask,
-                    onDismiss = onAddRowDismiss,
+                    onConfirm = { text ->
+                        onAddTask(text)
+                        showAddRow = false
+                    },
+                    onDismiss = { showAddRow = false },
+                )
+            }
+        } else {
+            item(key = "add_task_footer") {
+                SectionFooterAction(
+                    label = "+ Add New Task",
+                    onClick = { showAddRow = true },
                 )
             }
         }
 
-        // ── Crossed off section ───────────────────────────────────────────────
-        if (uiState.crossedOffTasks.isNotEmpty()) {
-            item(key = "header_crossed") {
-                CrossedSectionHeader(
-                    onDeleteAll = onBulkDeleteCrossedOff,
+        // ── Scheduled Tasks ───────────────────────────────────────────────────
+        // Phase 4: emitters not yet implemented — always show empty state.
+        // Phase 5 will replace this with a real emitter list + collapse toggle.
+        item(key = "scheduled_empty") {
+            EmptySectionLabel(label = "No Scheduled Tasks")
+        }
+        item(key = "schedule_new_task_footer") {
+            SectionFooterAction(
+                label = "+ Schedule New Task",
+                onClick = { /* Phase 5: open emitter creation dialog */ },
+            )
+        }
+
+        // ── Completed ─────────────────────────────────────────────────────────
+        if (uiState.crossedOffTasks.isEmpty()) {
+            item(key = "completed_empty") {
+                EmptySectionLabel(label = "No Completed Tasks")
+            }
+        } else {
+            item(key = "completed_header") {
+                CollapsibleSectionHeader(
+                    title = "Completed",
+                    count = uiState.crossedOffTasks.size,
+                    expanded = uiState.completedExpanded,
+                    onToggle = onToggleCompleted,
                 )
             }
-
-            itemsIndexed(
-                items = uiState.crossedOffTasks,
-                key = { _, task -> "crossed_${task.id}" },
-            ) { _, task ->
-                CrossedTaskRow(
-                    task = task,
-                    onRestore = { onRestore(task.id) },
-                )
+            if (uiState.completedExpanded) {
+                itemsIndexed(
+                    items = uiState.crossedOffTasks,
+                    key = { _, task -> "crossed_${task.id}" },
+                ) { _, task ->
+                    CrossedTaskRow(
+                        task = task,
+                        onRestore = { onRestore(task.id) },
+                    )
+                }
+                item(key = "delete_all_footer") {
+                    SectionFooterAction(
+                        label = "Delete All Completed",
+                        onClick = onBulkDeleteCrossedOff,
+                        isDestructive = true,
+                    )
+                }
             }
         }
 
-        // Bottom padding so FAB doesn't obscure the last item
         item(key = "bottom_spacer") { Spacer(Modifier.height(80.dp)) }
     }
 }
 
-// ── Row composables ───────────────────────────────────────────────────────────
+// ── NEXT section ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun NextSection(
+    nextTask: Task,
+    onMarkComplete: () -> Unit,
+    onSnooze: () -> Unit,
+) {
+    val isEmpty = nextTask == NullTask
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = if (isEmpty) "All caught up 🎉" else nextTask.text,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            if (!isEmpty) {
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onMarkComplete) {
+                        Text("Mark complete")
+                    }
+                    OutlinedButton(onClick = onSnooze) {
+                        Text("Snooze")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Section chrome ────────────────────────────────────────────────────────────
+
+@Composable
+private fun CollapsibleSectionHeader(
+    title: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (!expanded) {
+                Text(
+                    text = count.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Collapse section" else "Expand section",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        HorizontalDivider()
+    }
+}
+
+@Composable
+private fun EmptySectionLabel(label: String) {
+    Column {
+        Text(
+            text = label,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+        )
+        HorizontalDivider()
+    }
+}
+
+@Composable
+private fun SectionFooterAction(
+    label: String,
+    onClick: () -> Unit,
+    isDestructive: Boolean = false,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (isDestructive) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.primary,
+        ),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+// ── Task rows ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun ActiveTaskRow(
     task: Task,
+    isNextTask: Boolean,
     isDragging: Boolean,
     onCrossOff: () -> Unit,
     onEditText: (String) -> Unit,
@@ -230,15 +419,17 @@ private fun ActiveTaskRow(
 
     var isEditing by remember { mutableStateOf(false) }
     var draftValue by remember(task.id) { mutableStateOf(TextFieldValue(task.text)) }
-    // Guard: onFocusChanged fires with isFocused=false the instant BasicTextField is
-    // composed (before requestFocus() runs). Without this flag we would immediately
-    // reset isEditing=false, giving the user a one-frame flicker with no visible edit.
     var editorFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (isNextTask) Modifier.background(
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                ) else Modifier
+            )
             .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -257,7 +448,6 @@ private fun ActiveTaskRow(
                 value = draftValue,
                 onValueChange = { newValue ->
                     if ('\n' in newValue.text) {
-                        // Return key pressed — commit and exit edit mode
                         val trimmed = newValue.text.replace("\n", "")
                         editorFocused = false
                         isEditing = false
@@ -272,25 +462,19 @@ private fun ActiveTaskRow(
                     .onFocusChanged { focusState ->
                         if (focusState.isFocused) {
                             editorFocused = true
-                            // Select all so typing immediately replaces the existing text
                             draftValue = draftValue.copy(
                                 selection = TextRange(0, draftValue.text.length),
                             )
                         } else if (editorFocused) {
-                            // Genuine focus loss (user tapped elsewhere) — commit and exit
                             editorFocused = false
                             isEditing = false
                             if (draftValue.text.isNotBlank()) onEditText(draftValue.text)
                         }
-                        // isFocused=false before editorFocused=true → initial compose
-                        // event, ignore it so requestFocus() below can run first.
                     },
-                // Explicit color so dark-mode themes don't render invisible text
                 textStyle = LocalTextStyle.current.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-                // maxLines=1 keeps single-line visual but lets keyboard show ↵ (not ✓)
                 maxLines = 1,
             )
             LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -310,10 +494,7 @@ private fun ActiveTaskRow(
 }
 
 @Composable
-private fun CrossedTaskRow(
-    task: Task,
-    onRestore: () -> Unit,
-) {
+private fun CrossedTaskRow(task: Task, onRestore: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -334,11 +515,10 @@ private fun CrossedTaskRow(
     }
 }
 
+// ── Add task ──────────────────────────────────────────────────────────────────
+
 @Composable
-private fun AddTaskRow(
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
+private fun AddTaskRow(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
 
@@ -387,42 +567,4 @@ private fun AddTaskRow(
     }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-}
-
-// ── Section headers ───────────────────────────────────────────────────────────
-
-@Composable
-private fun SectionHeader(title: String) {
-    Column {
-        Text(
-            text = title,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        HorizontalDivider()
-    }
-}
-
-@Composable
-private fun CrossedSectionHeader(onDeleteAll: () -> Unit) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Crossed off",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            TextButton(onClick = onDeleteAll) {
-                Text("Delete all")
-            }
-        }
-        HorizontalDivider()
-    }
 }

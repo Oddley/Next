@@ -3,6 +3,7 @@ package com.oddley.next.app
 import android.app.Application
 import com.oddley.next.data.NextDatabase
 import com.oddley.next.data.TaskRepository
+import com.oddley.next.data.UiPrefsRepository
 import com.oddley.next.notification.TopTaskService
 
 /**
@@ -20,6 +21,10 @@ class NextApplication : Application() {
 
     val taskRepository: TaskRepository by lazy {
         TaskRepository(database.taskDao())
+    }
+
+    val uiPrefsRepository: UiPrefsRepository by lazy {
+        UiPrefsRepository(database.uiPrefsDao())
     }
 
     override fun onCreate() {
