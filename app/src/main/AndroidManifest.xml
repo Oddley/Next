@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Boot receiver: restart service after reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Exact alarms: required for AlarmManager.setExactAndAllowWhileIdle (API 31+).
+         User must grant once via Settings → Apps → Special app access → Alarms & reminders.
+         minSDK is 31 so no version guard needed. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:name=".app.NextApplication"
