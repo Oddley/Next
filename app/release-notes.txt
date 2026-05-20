@@ -1,1 +1,8 @@
-Initial release of Elly's "Next" app!
+New: Scheduled Tasks! You can now set tasks to automatically reappear on a schedule.
+
+- Tap "+ Schedule New Task" to create a scheduled reminder
+- Choose one-time or repeating (daily, weekly, monthly)
+- When it's time, the task pops back to the top of your list automatically
+- Tap any scheduled task to edit or delete it
+
+Everything else works the same as before.

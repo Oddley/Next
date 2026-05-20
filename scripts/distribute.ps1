@@ -68,10 +68,11 @@ try {
     # ── Distribute ─────────────────────────────────────────────────────────────
     Write-Host ""
     Write-Host "Uploading to Firebase App Distribution..." -ForegroundColor Yellow
+    # Use --release-notes-file so multi-line notes aren't split into extra CLI args
     firebase appdistribution:distribute $apk `
         --app $appId `
         --testers $testers `
-        --release-notes $notes
+        --release-notes-file $notesFile
 
     if ($LASTEXITCODE -ne 0) { throw "Firebase distribution failed (exit $LASTEXITCODE)." }
 
