@@ -72,6 +72,9 @@ dependencies {
     // Drag-and-drop reorder for LazyColumn
     implementation(libs.reorderable)
 
+    // RFC 5545 recurrence rule parsing and iteration (Task Emitters)
+    implementation(libs.dmfs.lib.recur)
+
     // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

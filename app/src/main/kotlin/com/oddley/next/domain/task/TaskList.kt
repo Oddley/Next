@@ -33,6 +33,15 @@ fun crossedOffTasks(tasks: List<Task>): List<Task> =
 fun nextOrderForInsert(tasks: List<Task>): Int =
     if (tasks.isEmpty()) 0 else tasks.maxOf { it.order } + 1000
 
+/**
+ * Returns the [Task.order] value to use when inserting a task at the **top**
+ * of the active section (e.g., when a Task Emitter fires).
+ *
+ * 0 for an empty list; otherwise min(active orders) - 1000.
+ */
+fun orderForTopInsert(tasks: List<Task>): Int =
+    if (tasks.isEmpty()) 0 else tasks.minOf { it.order } - 1000
+
 // ── Mutations ────────────────────────────────────────────────────────────────
 
 /**

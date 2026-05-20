@@ -79,6 +79,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Task Emitter: fires when the scheduled AlarmManager alarm triggers -->
+        <receiver
+            android:name=".notification.EmissionAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.oddley.next.EMISSION_ALARM" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

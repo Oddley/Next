@@ -15,19 +15,21 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *   2 — add snooze_session singleton table (Phase 2)
  *   3 — add snoozedUntil + emitterId to tasks; add ui_prefs + last_processed tables;
  *       drop snooze_session (Phase 3 — per-task snooze replaces SnoozeSession)
+ *   4 — add task_emitters table (Phase 5 — Task Emitters feature)
  *
  * Every schema change requires an explicit Migration. Never use
  * fallbackToDestructiveMigration() in a release build.
  */
 @Database(
-    entities = [TaskEntity::class, UiPrefsEntity::class, LastProcessedEntity::class],
-    version = 3,
+    entities = [TaskEntity::class, UiPrefsEntity::class, LastProcessedEntity::class, TaskEmitterEntity::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class NextDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun uiPrefsDao(): UiPrefsDao
     abstract fun lastProcessedDao(): LastProcessedDao
+    abstract fun emitterDao(): EmitterDao
 
     companion object {
 
@@ -79,13 +81,29 @@ abstract class NextDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS task_emitters (
+                        id            INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        label         TEXT NOT NULL,
+                        rrule         TEXT NOT NULL,
+                        dtStart       INTEGER NOT NULL,
+                        nextEmission  INTEGER
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun create(context: Context): NextDatabase =
             Room.databaseBuilder(
                 context.applicationContext,
                 NextDatabase::class.java,
                 "next.db",
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

@@ -9,22 +9,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Restarts [TopTaskService] and reschedules the emission alarm after device reboot.
+ * Fires when the [AlarmScheduler] exact alarm triggers.
  *
- * Exact alarms are cleared by Android on reboot, so we must re-arm here.
- * Requires RECEIVE_BOOT_COMPLETED permission in the manifest.
+ * Uses [goAsync] so coroutine work (DB + reschedule) can complete after
+ * [onReceive] returns. Android guarantees ~10 s before the process is killed.
  */
-class BootReceiver : BroadcastReceiver() {
+class EmissionAlarmReceiver : BroadcastReceiver() {
+
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-
-        TopTaskService.start(context)
-
-        // Reschedule the emission alarm — it is cleared on every reboot.
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val app = context.applicationContext as NextApplication
+                val now = System.currentTimeMillis()
+                app.emitterRepository.processEmissions(now)
                 val nextMs = app.emitterRepository.earliestNextEmission()
                 AlarmScheduler.scheduleNext(context, nextMs)
             } finally {

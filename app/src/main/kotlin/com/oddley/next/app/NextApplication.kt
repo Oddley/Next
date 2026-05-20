@@ -1,6 +1,7 @@
 package com.oddley.next.app
 
 import android.app.Application
+import com.oddley.next.data.EmitterRepository
 import com.oddley.next.data.NextDatabase
 import com.oddley.next.data.TaskRepository
 import com.oddley.next.data.UiPrefsRepository
@@ -12,6 +13,7 @@ import com.oddley.next.notification.TopTaskService
  * Usage from Activity / Service / Receiver:
  *   val app = context.applicationContext as NextApplication
  *   app.taskRepository
+ *   app.emitterRepository
  */
 class NextApplication : Application() {
 
@@ -21,6 +23,10 @@ class NextApplication : Application() {
 
     val taskRepository: TaskRepository by lazy {
         TaskRepository(database.taskDao())
+    }
+
+    val emitterRepository: EmitterRepository by lazy {
+        EmitterRepository(database.emitterDao(), database.taskDao())
     }
 
     val uiPrefsRepository: UiPrefsRepository by lazy {

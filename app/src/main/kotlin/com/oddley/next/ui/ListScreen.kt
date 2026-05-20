@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,36 +14,51 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,10 +70,100 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.oddley.next.domain.emitter.TaskEmitter
 import com.oddley.next.domain.task.NullTask
 import com.oddley.next.domain.task.Task
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+
+// ── Recurrence model ──────────────────────────────────────────────────────────
+
+private enum class RecurrenceMode(val label: String) {
+    ONE_TIME("One-time"),
+    DAILY("Daily"),
+    WEEKLY("Weekly"),
+    MONTHLY("Monthly"),
+}
+
+private enum class EndCondition(val label: String) {
+    FOREVER("Forever"),
+    AFTER_COUNT("After N times"),
+    UNTIL_DATE("Until date"),
+}
+
+private val WEEKDAY_CODES = listOf("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+private val WEEKDAY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
+
+/** Builds an RFC 5545 RRULE string from UI selections. */
+private fun buildRrule(
+    mode: RecurrenceMode,
+    selectedDays: Set<Int>,          // indices into WEEKDAY_CODES
+    endCondition: EndCondition,
+    count: Int,
+    until: Long?,                    // epoch ms
+): String {
+    val freq = when (mode) {
+        RecurrenceMode.ONE_TIME -> return "FREQ=DAILY;COUNT=1"
+        RecurrenceMode.DAILY -> "DAILY"
+        RecurrenceMode.WEEKLY -> "WEEKLY"
+        RecurrenceMode.MONTHLY -> "MONTHLY"
+    }
+    val sb = StringBuilder("FREQ=$freq")
+    if (mode == RecurrenceMode.WEEKLY && selectedDays.isNotEmpty()) {
+        sb.append(";BYDAY=${selectedDays.sorted().joinToString(",") { WEEKDAY_CODES[it] }}")
+    }
+    when (endCondition) {
+        EndCondition.FOREVER -> {}
+        EndCondition.AFTER_COUNT -> sb.append(";COUNT=${count.coerceAtLeast(1)}")
+        EndCondition.UNTIL_DATE -> {
+            if (until != null) {
+                val sdf = SimpleDateFormat("yyyyMMdd", Locale.US)
+                sb.append(";UNTIL=${sdf.format(Date(until))}T000000Z")
+            }
+        }
+    }
+    return sb.toString()
+}
+
+/** Human-readable summary of an emitter's schedule. */
+private fun scheduleDescription(emitter: TaskEmitter): String {
+    val nextMs = emitter.nextEmission ?: return "Completed"
+    val rrule = emitter.rrule
+    val freq = when {
+        rrule.contains("COUNT=1") -> "One-time"
+        rrule.contains("FREQ=DAILY") -> "Daily"
+        rrule.contains("FREQ=WEEKLY") -> "Weekly"
+        rrule.contains("FREQ=MONTHLY") -> "Monthly"
+        else -> ""
+    }
+    val nextStr = formatNextEmission(nextMs)
+    return if (freq.isEmpty()) nextStr else "$freq · $nextStr"
+}
+
+private fun formatNextEmission(epochMs: Long): String {
+    val now = System.currentTimeMillis()
+    val cal = Calendar.getInstance().apply { timeInMillis = epochMs }
+    val today = Calendar.getInstance()
+    val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+    val timeFmt = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val dateFmt = SimpleDateFormat("MMM d", Locale.getDefault())
+    return when {
+        epochMs <= now -> "Now"
+        cal.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) ->
+            "Today at ${timeFmt.format(Date(epochMs))}"
+        cal.get(Calendar.YEAR) == tomorrow.get(Calendar.YEAR) &&
+                cal.get(Calendar.DAY_OF_YEAR) == tomorrow.get(Calendar.DAY_OF_YEAR) ->
+            "Tomorrow at ${timeFmt.format(Date(epochMs))}"
+        else -> "${dateFmt.format(Date(epochMs))} at ${timeFmt.format(Date(epochMs))}"
+    }
+}
+
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +180,9 @@ fun ListScreen(
     onToggleTasks: () -> Unit,
     onToggleEmitters: () -> Unit,
     onToggleCompleted: () -> Unit,
+    onAddEmitter: (label: String, rrule: String, dtStart: Long) -> Unit,
+    onUpdateEmitter: (TaskEmitter) -> Unit,
+    onDeleteEmitter: (Long) -> Unit,
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text("Next") }) },
@@ -93,6 +203,9 @@ fun ListScreen(
             onToggleTasks = onToggleTasks,
             onToggleEmitters = onToggleEmitters,
             onToggleCompleted = onToggleCompleted,
+            onAddEmitter = onAddEmitter,
+            onUpdateEmitter = onUpdateEmitter,
+            onDeleteEmitter = onDeleteEmitter,
         )
     }
 }
@@ -112,9 +225,16 @@ private fun SectionedList(
     onToggleTasks: () -> Unit,
     onToggleEmitters: () -> Unit,
     onToggleCompleted: () -> Unit,
+    onAddEmitter: (label: String, rrule: String, dtStart: Long) -> Unit,
+    onUpdateEmitter: (TaskEmitter) -> Unit,
+    onDeleteEmitter: (Long) -> Unit,
 ) {
     val lazyListState = rememberLazyListState()
     var showAddRow by remember { mutableStateOf(false) }
+
+    // Emitter dialog state
+    var showEmitterDialog by rememberSaveable { mutableStateOf(false) }
+    var editingEmitter by remember { mutableStateOf<TaskEmitter?>(null) }
 
     // Local drag state — write to DB only on drag stop to prevent lurching.
     var draggingId by remember { mutableStateOf<Long?>(null) }
@@ -135,6 +255,43 @@ private fun SectionedList(
             current.add(toIdx, current.removeAt(fromIdx))
             draggedItems = current
         }
+    }
+
+    // Emitter dialog
+    if (showEmitterDialog) {
+        EmitterDialog(
+            emitter = editingEmitter,
+            onConfirm = { label, rrule, dtStart ->
+                val editing = editingEmitter
+                if (editing == null) {
+                    onAddEmitter(label, rrule, dtStart)
+                } else {
+                    onUpdateEmitter(
+                        editing.copy(
+                            label = label,
+                            rrule = rrule,
+                            dtStart = dtStart,
+                            // recompute nextEmission — EmitterRepository handles this
+                            // when the caller calls updateEmitter; pass current for now
+                            nextEmission = editing.nextEmission,
+                        )
+                    )
+                }
+                showEmitterDialog = false
+                editingEmitter = null
+            },
+            onDismiss = {
+                showEmitterDialog = false
+                editingEmitter = null
+            },
+            onDelete = if (editingEmitter != null) {
+                {
+                    onDeleteEmitter(editingEmitter!!.id)
+                    showEmitterDialog = false
+                    editingEmitter = null
+                }
+            } else null,
+        )
     }
 
     LazyColumn(
@@ -235,15 +392,42 @@ private fun SectionedList(
         }
 
         // ── Scheduled Tasks ───────────────────────────────────────────────────
-        // Phase 4: emitters not yet implemented — always show empty state.
-        // Phase 5 will replace this with a real emitter list + collapse toggle.
-        item(key = "scheduled_empty") {
-            EmptySectionLabel(label = "No Scheduled Tasks")
+        if (uiState.emitters.isEmpty()) {
+            item(key = "scheduled_empty") {
+                EmptySectionLabel(label = "No Scheduled Tasks")
+            }
+        } else {
+            item(key = "scheduled_header") {
+                CollapsibleSectionHeader(
+                    title = "Scheduled Tasks",
+                    count = uiState.emitters.size,
+                    expanded = uiState.emittersExpanded,
+                    onToggle = onToggleEmitters,
+                )
+            }
+            if (uiState.emittersExpanded) {
+                itemsIndexed(
+                    items = uiState.emitters,
+                    key = { _, emitter -> "emitter_${emitter.id}" },
+                ) { _, emitter ->
+                    EmitterRow(
+                        emitter = emitter,
+                        onEdit = {
+                            editingEmitter = emitter
+                            showEmitterDialog = true
+                        },
+                    )
+                }
+            }
         }
+
         item(key = "schedule_new_task_footer") {
             SectionFooterAction(
                 label = "+ Schedule New Task",
-                onClick = { /* Phase 5: open emitter creation dialog */ },
+                onClick = {
+                    editingEmitter = null
+                    showEmitterDialog = true
+                },
             )
         }
 
@@ -400,6 +584,31 @@ private fun SectionFooterAction(
             text = label,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+// ── Emitter row ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun EmitterRow(emitter: TaskEmitter, onEdit: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onEdit)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = emitter.label,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = scheduleDescription(emitter),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
     }
 }
 
@@ -567,4 +776,343 @@ private fun AddTaskRow(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+}
+
+// ── Emitter dialog ────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun EmitterDialog(
+    emitter: TaskEmitter?,            // null = create mode
+    onConfirm: (label: String, rrule: String, dtStart: Long) -> Unit,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)?,
+) {
+    // ── Initial state from existing emitter (edit) or defaults (create) ────────
+    val nowCal = remember { Calendar.getInstance() }
+    // Round up to next whole hour as a sensible default
+    nowCal.apply {
+        add(Calendar.HOUR_OF_DAY, 1)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+
+    var label by rememberSaveable { mutableStateOf(emitter?.label ?: "") }
+
+    // Date portion (epoch ms of midnight UTC of the chosen day, from DatePicker)
+    var selectedDateMs by rememberSaveable {
+        mutableLongStateOf(
+            emitter?.dtStart
+                ?: run {
+                    // Midnight UTC of today
+                    val c = Calendar.getInstance()
+                    c.set(Calendar.HOUR_OF_DAY, 0)
+                    c.set(Calendar.MINUTE, 0)
+                    c.set(Calendar.SECOND, 0)
+                    c.set(Calendar.MILLISECOND, 0)
+                    c.timeInMillis
+                }
+        )
+    }
+
+    // Time portion
+    var selectedHour by rememberSaveable {
+        mutableIntStateOf(emitter?.let {
+            Calendar.getInstance().apply { timeInMillis = it.dtStart }
+                .get(Calendar.HOUR_OF_DAY)
+        } ?: nowCal.get(Calendar.HOUR_OF_DAY))
+    }
+    var selectedMinute by rememberSaveable {
+        mutableIntStateOf(emitter?.let {
+            Calendar.getInstance().apply { timeInMillis = it.dtStart }
+                .get(Calendar.MINUTE)
+        } ?: 0)
+    }
+
+    var recurrenceMode by rememberSaveable {
+        mutableStateOf(
+            when {
+                emitter == null -> RecurrenceMode.ONE_TIME
+                emitter.rrule.contains("COUNT=1") -> RecurrenceMode.ONE_TIME
+                emitter.rrule.contains("FREQ=DAILY") -> RecurrenceMode.DAILY
+                emitter.rrule.contains("FREQ=WEEKLY") -> RecurrenceMode.WEEKLY
+                emitter.rrule.contains("FREQ=MONTHLY") -> RecurrenceMode.MONTHLY
+                else -> RecurrenceMode.ONE_TIME
+            }
+        )
+    }
+
+    // Weekly day selection (bit flags by WEEKDAY_CODES index)
+    var selectedDays by rememberSaveable {
+        mutableStateOf(
+            if (emitter != null && emitter.rrule.contains("BYDAY=")) {
+                val byday = emitter.rrule.substringAfter("BYDAY=").substringBefore(";")
+                byday.split(",").mapNotNull { code -> WEEKDAY_CODES.indexOf(code).takeIf { it >= 0 } }.toSet()
+            } else setOf()
+        )
+    }
+
+    var endCondition by rememberSaveable { mutableStateOf(EndCondition.FOREVER) }
+    var countText by rememberSaveable { mutableStateOf("4") }
+    var untilDateMs by rememberSaveable { mutableLongStateOf(System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000) }
+
+    // Sub-picker visibility
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var showUntilDatePicker by remember { mutableStateOf(false) }
+
+    // ── DatePicker for first occurrence ───────────────────────────────────────
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDateMs,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                    utcTimeMillis >= System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { selectedDateMs = it }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // ── TimePicker for first occurrence ───────────────────────────────────────
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = selectedHour,
+            initialMinute = selectedMinute,
+            is24Hour = false,
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("Select time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedHour = timePickerState.hour
+                    selectedMinute = timePickerState.minute
+                    showTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // ── Until date picker ─────────────────────────────────────────────────────
+    if (showUntilDatePicker) {
+        val untilPickerState = rememberDatePickerState(
+            initialSelectedDateMillis = untilDateMs,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                    utcTimeMillis > selectedDateMs
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { showUntilDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    untilPickerState.selectedDateMillis?.let { untilDateMs = it }
+                    showUntilDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUntilDatePicker = false }) { Text("Cancel") }
+            },
+        ) {
+            DatePicker(state = untilPickerState)
+        }
+    }
+
+    // ── Main dialog ───────────────────────────────────────────────────────────
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (emitter == null) "Schedule Task" else "Edit Schedule")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+                // Label
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("Task name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // Date + Time row
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                        Text(dateFmt.format(Date(selectedDateMs)))
+                    }
+                    OutlinedButton(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        val timeFmt = SimpleDateFormat("h:mm a", Locale.getDefault())
+                        val timeCal = Calendar.getInstance().apply {
+                            set(Calendar.HOUR_OF_DAY, selectedHour)
+                            set(Calendar.MINUTE, selectedMinute)
+                        }
+                        Text(timeFmt.format(timeCal.time))
+                    }
+                }
+
+                // Recurrence
+                Text(
+                    "Repeat",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Column {
+                    RecurrenceMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { recurrenceMode = mode },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = recurrenceMode == mode,
+                                onClick = { recurrenceMode = mode },
+                            )
+                            Text(mode.label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
+                // Weekly day selector
+                if (recurrenceMode == RecurrenceMode.WEEKLY) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        WEEKDAY_LABELS.forEachIndexed { index, dayLabel ->
+                            FilterChip(
+                                selected = index in selectedDays,
+                                onClick = {
+                                    selectedDays = if (index in selectedDays) {
+                                        selectedDays - index
+                                    } else {
+                                        selectedDays + index
+                                    }
+                                },
+                                label = { Text(dayLabel) },
+                            )
+                        }
+                    }
+                }
+
+                // End condition (only for repeating modes)
+                if (recurrenceMode != RecurrenceMode.ONE_TIME) {
+                    Text(
+                        "Ends",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Column {
+                        EndCondition.entries.forEach { cond ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { endCondition = cond },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(
+                                    selected = endCondition == cond,
+                                    onClick = { endCondition = cond },
+                                )
+                                Text(cond.label, style = MaterialTheme.typography.bodyMedium)
+                                if (cond == EndCondition.AFTER_COUNT && endCondition == cond) {
+                                    Spacer(Modifier.width(8.dp))
+                                    BasicTextField(
+                                        value = countText,
+                                        onValueChange = { v ->
+                                            if (v.all { it.isDigit() } && v.length <= 3) countText = v
+                                        },
+                                        modifier = Modifier.width(40.dp),
+                                        textStyle = LocalTextStyle.current.copy(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        ),
+                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                                        maxLines = 1,
+                                    )
+                                    Text(" times", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
+                    if (endCondition == EndCondition.UNTIL_DATE) {
+                        OutlinedButton(
+                            onClick = { showUntilDatePicker = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                            Text("Until ${dateFmt.format(Date(untilDateMs))}")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onDelete != null) {
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete emitter",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(
+                    onClick = {
+                        if (label.isBlank()) return@TextButton
+                        // Build dtStart from selected date (UTC midnight) + local time
+                        val dtStart = run {
+                            val dateCal = Calendar.getInstance().apply {
+                                timeInMillis = selectedDateMs
+                            }
+                            Calendar.getInstance().apply {
+                                set(Calendar.YEAR, dateCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, dateCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, dateCal.get(Calendar.DAY_OF_MONTH))
+                                set(Calendar.HOUR_OF_DAY, selectedHour)
+                                set(Calendar.MINUTE, selectedMinute)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }.timeInMillis
+                        }
+                        val rrule = buildRrule(
+                            mode = recurrenceMode,
+                            selectedDays = selectedDays,
+                            endCondition = if (recurrenceMode == RecurrenceMode.ONE_TIME)
+                                EndCondition.FOREVER else endCondition,
+                            count = countText.toIntOrNull() ?: 1,
+                            until = untilDateMs,
+                        )
+                        onConfirm(label.trim(), rrule, dtStart)
+                    },
+                    enabled = label.isNotBlank(),
+                ) { Text("Save") }
+            }
+        },
+    )
 }

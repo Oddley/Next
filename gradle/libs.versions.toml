@@ -11,6 +11,7 @@ ksp = "2.2.10-2.0.2"
 room = "2.7.1"
 junitJupiter = "5.11.4"
 reorderable = "3.1.0"
+libRecur = "0.17.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -35,6 +36,7 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
 junit-platform-launcher = { group = "org.junit.platform", name = "junit-platform-launcher", version = "1.11.4" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
+dmfs-lib-recur = { group = "org.dmfs", name = "lib-recur", version.ref = "libRecur" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
