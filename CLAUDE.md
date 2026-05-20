@@ -2,7 +2,10 @@
 
 Native Android TODO app: foster mama's working stack with controlled deferral.
 
-The defining mechanic is **snooze + offset**: she can push the top item(s) down temporarily without losing them, creating a new "current top" that stays prominent until she actively engages with it. The persistent notification keeps that current top in her face — by design, it's the only TODO that matters until she clears it or pushes it.
+The defining mechanic is **snooze + task emitters**: tasks can be snoozed individually
+(temporarily removed from the NEXT slot), and emitters automatically surface tasks on a
+schedule (one-shot or recurring). The persistent notification mirrors the NEXT slot —
+the top non-snoozed task — keeping it in her face until she acts on it.
 
 ## Standards (read before writing any code)
 
@@ -15,8 +18,9 @@ The defining mechanic is **snooze + offset**: she can push the top item(s) down 
 | Documentation | [ADR-005](docs/adr/005-documentation.md) |
 | Git workflow | [ADR-006](docs/adr/006-git-workflow.md) |
 | Notification (foreground service) | [ADR-007](docs/adr/007-notification-strategy.md) |
-| Snooze data model | [ADR-008](docs/adr/008-snooze-data-model.md) |
-| Drive sync (manual push/pull) | [ADR-009](docs/adr/009-drive-sync-strategy.md) |
+| Snooze data model (**superseded by ADR-010**) | [ADR-008](docs/adr/008-snooze-data-model.md) |
+| Drive sync (manual push/pull, deferred) | [ADR-009](docs/adr/009-drive-sync-strategy.md) |
+| Task Emitters — scheduled + recurring tasks | [ADR-010](docs/adr/010-task-emitters.md) |
 
 ## Actual Directory Structure (as built — Phases 1 & 2 complete)
 
@@ -100,11 +104,12 @@ docs/
 ## Key Invariants (override everything else)
 
 1. **Domain code is pure Kotlin and fully tested.** No Android imports, no Room, no Compose. Compiles in a plain JVM module.
-2. **Snooze is zero-or-one**, never more. Computing top of stack honors the offset whether the session is expired or not. Only "Mark complete" or "Snooze" on an *expired* session clears it.
-3. **Cross-off preserves order.** Items don't reorder when crossed off — they're filtered between two views (active / crossed) while keeping their relative positions.
-4. **Absence is typed.** No nullable returns in domain code — use sealed types or Null Objects (ADR-004).
-5. **Red before green.** No domain feature code without a failing test first.
-6. **The notification is the app's main interface.** The full list view is for editing; the notification is the daily-driver surface. If a feature lives only in the list view, foster mama may never see it.
+2. **Snooze is per-task.** Each `Task` carries a nullable `snoozedUntil: Long?` timestamp. Tasks do not reorder when snoozed — they stay in drag position and show 💤. NEXT is always the first non-snoozed task scanning top-to-bottom. The old `SnoozeSession`/offset model is deleted (ADR-010).
+3. **One task per emitter.** A `TaskEmitter` always has at most one living `Task` (by `emitterId` FK). On emission, reuse that task unconditionally — uncross, unsnooze, move to top. Never create a second task for the same emitter.
+4. **Cross-off preserves order.** Items don't reorder when crossed off — they're filtered to the Completed section while keeping their relative positions.
+5. **Absence is typed.** No nullable returns in domain code — use sealed types or Null Objects (ADR-004).
+6. **Red before green.** No domain feature code without a failing test first.
+7. **The notification is the app's main interface.** The full list view is for editing; the notification is the daily-driver surface. If a feature lives only in the list view, foster mama may never see it.
 
 ## Gotchas Learned in Implementation
 

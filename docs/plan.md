@@ -9,21 +9,24 @@ Three phases, each producing a feature-complete deliverable installable on foste
 | Language | Kotlin |
 | UI | Jetpack Compose |
 | Persistence | Room (SQLite wrapper) |
-| Min SDK | API 26 (Android 8.0) |
-| Target SDK | 35 |
+| Min SDK | API 31 (Android 12) — raised from 26 for SCHEDULE_EXACT_ALARM |
+| Target SDK | 36 |
 | Architecture | FC/IS — pure-Kotlin `domain/`, Android `data/`/`ui/`/`notification/` shells (ADR-002) |
 | TDD scope | All `domain/` exports, JVM unit tests only (ADR-003) |
 | Notification | Foreground service, non-dismissable (ADR-007) |
-| Drive sync | Manual push/pull, no merge (ADR-009) |
+| Drive sync | DEFERRED indefinitely (ADR-009) |
 | DI | Manual (single-graph composition root in `app/`); revisit if it gets painful |
+| Recurrence | RFC 5545 RRULE via `dmfs/lib-recur` (ADR-010) |
 
 ## Phase Map
 
-| Phase | Deliverable | Size |
+| Phase | Deliverable | Status |
 |---|---|---|
-| 1 | List + cross-off + reorder + Room persistence | Medium |
-| 2 | Foreground-service notification + snooze | Largest |
-| 3 | Drive push/pull | Medium |
+| 1 | List + cross-off + reorder + Room persistence | ✓ COMPLETE |
+| 2 | Foreground-service notification + snooze | ✓ COMPLETE |
+| 3 | Foundation refactor — per-task snooze, UI sections, minSDK | Next |
+| 4 | UI refactor — four collapsible sections, NEXT panel | After 3 |
+| 5 | Task Emitters — scheduled + recurring tasks | After 4 |
 
 ---
 
@@ -95,34 +98,140 @@ Three phases, each producing a feature-complete deliverable installable on foste
 
 ---
 
-## Phase 3 — Drive Push/Pull ~~(DEFERRED)~~
+## Phase 3 — Foundation Refactor (snooze model + minSDK)
 
-> **Status: DEFERRED** — Drive sync is deprioritised indefinitely. The backup use-case may be revisited in a future phase, but is explicitly out of scope for active development.
+> **Status: Next**
 
-**Deliverable:** User can sign into Google Drive, push their current task state to a file, and pull a previously-pushed file back to replace local state.
+**Deliverable:** No visible user-facing change, but the internal architecture is
+correct for Phases 4 and 5. SnoozeSession is deleted, per-task snooze is in place,
+the database is migrated, and minSDK is 31.
 
 **Verification:**
-1. Sign in to Drive via in-app button → Google account picker → consent screen
-2. Push button → local state written to Drive as a JSON file (consistent name, e.g., `next-tasks.json` or user-picked)
-3. On a fresh install (or after a wipe), sign in, Pull → local state matches what was pushed
-4. Push → modify a task locally → Push again → Drive file overwritten with new state
-5. Sign out → buttons disabled until next sign-in
+1. `./gradlew test` — all domain tests pass (SnoozeOpsTest is replaced/updated)
+2. Install on device — existing tasks preserved, notification still works
+3. Snooze action from notification sets `snoozedUntil` on the top task; next task
+   becomes the notification target
+4. Mark complete from notification still works
+5. Reboot — notification restores correctly
 
-**Domain scope (`domain/sync/`):**
-- Pure serialize/deserialize of the full state (tasks + snooze session + schema version)
-- No transport code
+**Domain scope:**
+- Delete `domain/snooze/` entirely (`SnoozeSession`, `NullSnoozeSession`, `SnoozeOps`)
+- Add `snoozedUntil: Long?` and `emitterId: Long?` to `Task`
+- Update `TaskOps`: add `computeNext(tasks)` (first non-snoozed task, scanning
+  top-to-bottom), `applySnoozedUntil(task, epochMs)`, `applyUnsnoozed(task)`
+- TDD: replace `SnoozeOpsTest` with `TaskOpsExtendedTest` covering snooze transitions
 
-**Data scope (`data/drive/`):**
-- Google Sign-In + Drive REST API wrapper
-- Read/write a single JSON file via `drive.file` scope
+**Data scope:**
+- Delete `SnoozeSessionEntity`, `SnoozeDao`, `SnoozeRepository`
+- Add `snoozed_until` (Long?) and `emitter_id` (Long?) columns to `tasks` (nullable,
+  default null — zero migration friction)
+- Add `ui_prefs` table: `UiPrefsEntity(id=1, tasksExpanded, emittersExpanded, completedExpanded)`
+- Add `last_processed` table: `LastProcessedEntity(id=1, epochMs)`
+- Room MIGRATION_2_3
+- Update `TaskEntity` mappers; update `TaskRepository`
+
+**Notification scope:**
+- Update `TopTaskService` to call `TaskOps.computeNext()` instead of `SnoozeOps.computeCurrentTop()`
+- Update `SnoozeReceiver` to write `snoozedUntil` on the task directly
+- Delete `SnoozeDao`/`SnoozeRepository` references
+
+**minSDK:**
+- Raise from 26 to 31 in `app/build.gradle.kts`
+- Add `SCHEDULE_EXACT_ALARM` permission declaration to `AndroidManifest.xml`
+
+---
+
+## Phase 4 — UI Refactor (four collapsible sections)
+
+> **Status: After Phase 3**
+
+**Deliverable:** The list view is restructured into four collapsible sections.
+NEXT, Tasks, Scheduled Tasks (empty placeholder), Completed.
+
+**Verification:**
+1. NEXT section shows the top non-snoozed task with Complete and Snooze buttons
+2. Complete from NEXT section crosses off the task; next non-snoozed task appears
+3. Snooze from NEXT section sets snoozedUntil; next non-snoozed task appears; 💤
+   appears on snoozed task in Tasks section
+4. NEXT highlighted task in Tasks section matches NEXT section
+5. Collapse Tasks → count badge; expand → list returns
+6. Empty Scheduled Tasks → shows "No Scheduled Tasks" label (no header/toggle)
+7. Collapsed state survives app restart (Room-persisted)
+8. Drag reorder in Tasks section still works; no offset math
 
 **UI scope:**
-- Sync section in settings (or as part of the list view): Sign in/out, Push, Pull, last-pushed timestamp
-- Confirm dialog before Pull (overwrites local data — destructive)
+- Rewrite `ListScreen.kt` as a four-section `LazyColumn` with collapsible headers
+- `ListUiState` simplification: single `activeTasks: List<Task>`, no `displayTasks`
+- Remove `computeDisplayTasks()`, dual-list state, display→underlying index mapping
+- `NEXT` composable: shows top task text + Complete + Snooze action buttons
+- `CollapsibleSection` composable: header with chevron + count; "none" placeholder
+- `TaskRow` loses `isSnoozed` parameter; reads `task.snoozedUntil` directly
+- `UiPrefsRepository` for collapsed state read/write
+- `ListViewModel` subscribes to `uiPrefsRepository.prefs` flow
 
-**Out of scope (intentionally):**
-- Auto-sync, conflict resolution, multi-device live sync — all "future phase or never"
-- Per-task sync state — the whole state is pushed/pulled as one blob
+---
+
+## Phase 5 — Task Emitters (scheduled + recurring tasks)
+
+> **Status: After Phase 4**
+
+**Deliverable:** Elly can create one-shot or recurring scheduled tasks. Emitters appear
+in the Scheduled Tasks section. At the scheduled time the emitter's task surfaces at
+the top of the active list (and the notification).
+
+**Verification:**
+1. "Schedule New Task" opens a creation dialog: name, date/time, recurrence (None /
+   Daily / Weekly / Monthly / Yearly), optional end condition
+2. Created emitter appears in Scheduled Tasks section with "next: [date]" label
+3. At the scheduled time, the task appears at the top of Tasks and in NEXT
+4. For recurring: after the task is acted on (or the next interval arrives), the
+   emitter's next-emission date advances correctly
+5. Tapping an emitter in Scheduled Tasks opens the edit dialog
+6. One-shot emitter disappears from Scheduled Tasks after firing
+7. Device rebooted before emission → alarm is rescheduled on boot; fires correctly
+8. Phone off for 3 intervals → catches up with one emission, not three
+
+**Domain scope (`domain/emitter/`):**
+- `TaskEmitter` data class, `EmitterOps` (pure, TDD'd)
+- `EmitterOps.computeNextEmission(rrule, after)` — advances via lib-recur
+- `EmitterOps.shouldEmit(emitter, now)` — `nextEmission ≤ now`
+- `EmitterOps.advanceEmitter(emitter, now)` — returns updated emitter or null if
+  one-shot/exhausted
+- TDD: covers one-shot, recurring, catch-up, exhausted recurrence
+
+**Data scope:**
+- `TaskEmitterEntity`, `EmitterDao`, `EmitterRepository`
+- `EmitterRepository.dueEmitters(now)` — returns emitters ready to fire
+- Emission transaction: update/create task (uncross + unsnooze + move to top OR
+  insert new), advance `nextEmission`, write back `taskId`
+
+**Notification scope:**
+- `EmissionAlarmReceiver` — fired by AlarmManager; runs emission transaction;
+  reschedules next alarm
+- `AlarmScheduler` utility: `scheduleNext(emitters)` — sets
+  `AlarmManager.setExactAndAllowWhileIdle` for earliest `nextEmission`
+- `BootReceiver` — also calls `AlarmScheduler.scheduleNext()` after boot
+- Permission check: `SCHEDULE_EXACT_ALARM` — request on first launch if missing;
+  disable scheduling with UI prompt if denied
+
+**UI scope:**
+- `ScheduledTasksSection` composable: list of emitter rows (name + next emission)
+- `EmitterEditDialog` composable: name field, date/time picker, recurrence picker
+- `RecurrencePickerRow` composable: frequency dropdown + conditional day-of-week
+  grid (Weekly) + end-condition row (Never / After N / Until date)
+- Reference: Google Calendar's recurrence UI
+
+**New dependency:**
+```kotlin
+implementation("org.dmfs:lib-recur:0.15.1")
+```
+
+---
+
+## [DEFERRED] Drive Push/Pull (was Phase 3)
+
+> **Status: Deferred indefinitely** — The backup use-case may be revisited in a
+> future phase, but is explicitly out of scope for active development. See ADR-009.
 
 ---
 
