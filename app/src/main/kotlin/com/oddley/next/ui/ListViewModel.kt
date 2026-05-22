@@ -10,7 +10,6 @@ import com.oddley.next.data.TaskRepository
 import com.oddley.next.data.UiPrefsRepository
 import com.oddley.next.domain.emitter.TaskEmitter
 import com.oddley.next.domain.task.NullTask
-import com.oddley.next.domain.task.SNOOZE_DURATION_MS
 import com.oddley.next.domain.task.Task
 import com.oddley.next.domain.task.activeTasks
 import com.oddley.next.domain.task.computeNext
@@ -63,24 +62,6 @@ class ListViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = ListUiState(),
     )
-
-    // ── NEXT section actions ──────────────────────────────────────────────────
-
-    /** Crosses off the current NEXT task. */
-    fun markComplete() {
-        val id = uiState.value.nextTask.id
-        if (id == NullTask.id) return
-        viewModelScope.launch { taskRepository.crossOff(id) }
-    }
-
-    /** Snoozes the current NEXT task for [SNOOZE_DURATION_MS]. */
-    fun snooze() {
-        val id = uiState.value.nextTask.id
-        if (id == NullTask.id) return
-        viewModelScope.launch {
-            taskRepository.snoozeTask(id, System.currentTimeMillis() + SNOOZE_DURATION_MS)
-        }
-    }
 
     // ── Task list actions ─────────────────────────────────────────────────────
 

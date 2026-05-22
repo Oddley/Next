@@ -49,8 +49,6 @@ class MainActivity : ComponentActivity() {
                     onEditText = viewModel::editText,
                     onReorder = viewModel::reorder,
                     onBulkDeleteCrossedOff = viewModel::bulkDeleteCrossedOff,
-                    onMarkComplete = viewModel::markComplete,
-                    onSnooze = viewModel::snooze,
                     onToggleTasks = viewModel::toggleTasksExpanded,
                     onToggleEmitters = viewModel::toggleEmittersExpanded,
                     onToggleCompleted = viewModel::toggleCompletedExpanded,

@@ -26,11 +26,9 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,7 +38,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -179,8 +176,6 @@ fun ListScreen(
     onEditText: (Long, String) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
-    onMarkComplete: () -> Unit,
-    onSnooze: () -> Unit,
     onToggleTasks: () -> Unit,
     onToggleEmitters: () -> Unit,
     onToggleCompleted: () -> Unit,
@@ -202,8 +197,6 @@ fun ListScreen(
             onEditText = onEditText,
             onReorder = onReorder,
             onBulkDeleteCrossedOff = onBulkDeleteCrossedOff,
-            onMarkComplete = onMarkComplete,
-            onSnooze = onSnooze,
             onToggleTasks = onToggleTasks,
             onToggleEmitters = onToggleEmitters,
             onToggleCompleted = onToggleCompleted,
@@ -224,8 +217,6 @@ private fun SectionedList(
     onEditText: (Long, String) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onBulkDeleteCrossedOff: () -> Unit,
-    onMarkComplete: () -> Unit,
-    onSnooze: () -> Unit,
     onToggleTasks: () -> Unit,
     onToggleEmitters: () -> Unit,
     onToggleCompleted: () -> Unit,
@@ -249,9 +240,9 @@ private fun SectionedList(
         if (draggingId == null) draggedItems = null
     }
 
-    // NEXT section (index 0) + Tasks header (index 1) = headerOffset 2
+    // Tasks header (index 0) = headerOffset 1
     val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val headerOffset = 2
+        val headerOffset = 1
         val fromIdx = from.index - headerOffset
         val toIdx = to.index - headerOffset
         val current = (draggedItems ?: uiState.activeTasks).toMutableList()
@@ -302,15 +293,6 @@ private fun SectionedList(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
     ) {
-
-        // ── NEXT ─────────────────────────────────────────────────────────────
-        item(key = "next_section") {
-            NextSection(
-                nextTask = uiState.nextTask,
-                onMarkComplete = onMarkComplete,
-                onSnooze = onSnooze,
-            )
-        }
 
         // ── Tasks ─────────────────────────────────────────────────────────────
         if (uiState.activeTasks.isEmpty()) {
@@ -470,45 +452,6 @@ private fun SectionedList(
         }
 
         item(key = "bottom_spacer") { Spacer(Modifier.height(80.dp)) }
-    }
-}
-
-// ── NEXT section ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun NextSection(
-    nextTask: Task,
-    onMarkComplete: () -> Unit,
-    onSnooze: () -> Unit,
-) {
-    val isEmpty = nextTask == NullTask
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = if (isEmpty) "All caught up 🎉" else nextTask.text,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            if (!isEmpty) {
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onMarkComplete) {
-                        Text("Mark complete")
-                    }
-                    OutlinedButton(onClick = onSnooze) {
-                        Text("Snooze")
-                    }
-                }
-            }
-        }
     }
 }
 
