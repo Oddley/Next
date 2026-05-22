@@ -1,8 +1,10 @@
 package com.oddley.next.data
 
+import com.oddley.next.domain.task.NullTask
 import com.oddley.next.domain.task.Task
 import com.oddley.next.domain.task.activeTasks
 import com.oddley.next.domain.task.bulkDeleteCrossedOff
+import com.oddley.next.domain.task.computeNext
 import com.oddley.next.domain.task.crossOff
 import com.oddley.next.domain.task.crossedOffTasks
 import com.oddley.next.domain.task.editText
@@ -88,10 +90,34 @@ class TaskRepository(private val dao: TaskDao) {
         dao.deleteAllCrossedOff()
     }
 
-    /** Sets [snoozedUntil] on the task with [id]. No-op if id not found. */
+    /**
+     * Snoozes the task with [id] until [until] (epoch ms).
+     *
+     * **All-snoozed fallback:** if snoozing would leave zero non-snoozed active tasks
+     * (no NEXT task available), all active task snoozes are cleared instead so the list
+     * never goes entirely dark. This matches Elly's expectation that snoozed items
+     * un-snooze when you reach the bottom of the list.
+     */
     suspend fun snoozeTask(id: Long, until: Long) {
-        val task = dao.getAllOnce().map { it.toDomain() }.firstOrNull { it.id == id } ?: return
-        dao.update(snoozeTask(task, until).toEntity())
+        val current = dao.getAllOnce().map { it.toDomain() }
+        val now = System.currentTimeMillis()
+
+        // Apply the requested snooze tentatively
+        val tentative = current.map { if (it.id == id) snoozeTask(it, until) else it }
+
+        val toSave: List<Task> = if (computeNext(tentative, now) == NullTask) {
+            // Every active task would be snoozed — clear all snoozes instead
+            current.map { if (!it.crossedOff) unsnoozeTask(it) else it }
+        } else {
+            tentative
+        }
+
+        val changed = toSave.filter { task ->
+            current.firstOrNull { it.id == task.id } != task
+        }
+        if (changed.isNotEmpty()) {
+            dao.updateAll(changed.map { it.toEntity() })
+        }
     }
 
     /** Clears [snoozedUntil] on the task with [id]. No-op if id not found. */

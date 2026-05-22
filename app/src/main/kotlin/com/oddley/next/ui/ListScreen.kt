@@ -79,6 +79,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 // ── Recurrence model ──────────────────────────────────────────────────────────
 
@@ -121,7 +122,10 @@ private fun buildRrule(
         EndCondition.AFTER_COUNT -> sb.append(";COUNT=${count.coerceAtLeast(1)}")
         EndCondition.UNTIL_DATE -> {
             if (until != null) {
-                val sdf = SimpleDateFormat("yyyyMMdd", Locale.US)
+                // DatePicker returns midnight UTC — format in UTC to get the correct date string.
+                val sdf = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
                 sb.append(";UNTIL=${sdf.format(Date(until))}T000000Z")
             }
         }
@@ -960,7 +964,11 @@ private fun EmitterDialog(
                         onClick = { showDatePicker = true },
                         modifier = Modifier.weight(1f),
                     ) {
-                        val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                        // DatePicker returns midnight UTC — read in UTC so US users
+                        // see the correct date (not "yesterday").
+                        val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }
                         Text(dateFmt.format(Date(selectedDateMs)))
                     }
                     OutlinedButton(
@@ -1062,7 +1070,9 @@ private fun EmitterDialog(
                             onClick = { showUntilDatePicker = true },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                            val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).apply {
+                                timeZone = TimeZone.getTimeZone("UTC")
+                            }
                             Text("Until ${dateFmt.format(Date(untilDateMs))}")
                         }
                     }
@@ -1085,15 +1095,17 @@ private fun EmitterDialog(
                 TextButton(
                     onClick = {
                         if (label.isBlank()) return@TextButton
-                        // Build dtStart from selected date (UTC midnight) + local time
+                        // Build dtStart from selected date (UTC midnight) + local time.
+                        // DatePicker returns midnight UTC — extract year/month/day in UTC
+                        // so US users (UTC-) don't land on the day before.
                         val dtStart = run {
-                            val dateCal = Calendar.getInstance().apply {
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
                                 timeInMillis = selectedDateMs
                             }
                             Calendar.getInstance().apply {
-                                set(Calendar.YEAR, dateCal.get(Calendar.YEAR))
-                                set(Calendar.MONTH, dateCal.get(Calendar.MONTH))
-                                set(Calendar.DAY_OF_MONTH, dateCal.get(Calendar.DAY_OF_MONTH))
+                                set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
                                 set(Calendar.HOUR_OF_DAY, selectedHour)
                                 set(Calendar.MINUTE, selectedMinute)
                                 set(Calendar.SECOND, 0)
