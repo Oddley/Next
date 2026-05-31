@@ -22,7 +22,7 @@ the top non-snoozed task — keeping it in her face until she acts on it.
 | Drive sync (manual push/pull, deferred) | [ADR-009](docs/adr/009-drive-sync-strategy.md) |
 | Task Emitters — scheduled + recurring tasks | [ADR-010](docs/adr/010-task-emitters.md) |
 
-## Actual Directory Structure (as built — Phases 1 & 2 complete)
+## Actual Directory Structure (as built)
 
 ```
 app/src/main/
@@ -30,38 +30,47 @@ app/src/main/
     domain/
       task/
         Task.kt               ← data class + NullTask + pure list ops
-        TaskOps.kt            ← activeTasks(), crossedOffTasks(), reorder(), etc.
+        TaskList.kt           ← activeTasks(), crossedOffTasks(), reorder(), computeNext(), etc.
         CLAUDE.md
-      snooze/
-        SnoozeSession.kt      ← data class + NullSnoozeSession sentinel
-        SnoozeOps.kt          ← computeCurrentTop(), applySnooze(), applyMarkComplete()
+      emitter/
+        TaskEmitter.kt        ← data class; nextEmission=null means exhausted
+        EmitterOps.kt         ← computeNextEmission(), shouldEmit(), advanceEmitter()
         CLAUDE.md
     data/
       TaskEntity.kt           ← Room entity + toDomain()/toEntity() mappers
       TaskDao.kt
-      SnoozeSessionEntity.kt  ← Room entity (singleton row, id=1)
-      SnoozeDao.kt
-      NextDatabase.kt         ← Room DB v2, MIGRATION_1_2
+      TaskEmitterEntity.kt    ← Room entity for TaskEmitter
+      EmitterDao.kt
+      NextDatabase.kt         ← Room DB v4; migrations 1→2→3→4
       TaskRepository.kt       ← exposes Flow<List<Task>>, reorder (id-based diff)
-      SnoozeRepository.kt     ← exposes Flow<SnoozeSession>, snooze(), markComplete(), clear()
+      EmitterRepository.kt    ← processEmissions(), addEmitter(), earliestNextEmission()
+      UiPrefsRepository.kt    ← persists section expand/collapse state
       CLAUDE.md
     ui/
-      ListViewModel.kt        ← combine(tasks, session) → ListUiState
-                                 DisplayTask(task, isSnoozed) for display ordering
-                                 computeDisplayTasks(): [top, 💤snoozed..., remaining...]
+      ListViewModel.kt        ← combine(tasks, emitters, prefs) → ListUiState
+                                 init block processes overdue emissions on every app open
       ListScreen.kt           ← stateless Compose; drag state held locally (draggedItems)
                                  to avoid Room round-trips per move
+                                 TopAppBar: version subtitle + ⋮ menu (Report Issue, Submit Log)
+                                 AlarmPermissionBanner shown when exact alarm not granted
       CLAUDE.md
     notification/
       TopTaskService.kt       ← foreground service; observing flag prevents double-start;
                                  lastNotification re-posted on dismiss to re-anchor
+      AlarmScheduler.kt       ← scheduleNext() guards canScheduleExactAlarms(); falls back
+                                 to setAndAllowWhileIdle if exact alarm not granted
+      EmissionAlarmReceiver.kt ← fires when AlarmManager alarm triggers; calls processEmissions
       MarkCompleteReceiver.kt
       SnoozeReceiver.kt
-      BootReceiver.kt         ← restarts service after reboot
+      BootReceiver.kt         ← restarts service + calls processEmissions on reboot
       NotificationDismissedReceiver.kt ← re-anchors when user swipes (Android 13+)
       CLAUDE.md
+    util/
+      AppLogger.kt            ← file logger; AppLogger.log(context, tag, msg) appends to
+                                 filesDir/next.log (200KB cap, auto-truncates)
+                                 AppLogger.readRecent(context) returns last 8KB for sharing
     app/
-      NextApplication.kt      ← manual DI root; taskRepository + snoozeRepository lazy
+      NextApplication.kt      ← manual DI root; taskRepository + emitterRepository lazy
       CLAUDE.md
   res/
     drawable/
@@ -80,7 +89,7 @@ app/src/main/
   AndroidManifest.xml
 app/src/test/
   kotlin/com/oddley/next/domain/snooze/
-    SnoozeOpsTest.kt          ← 12 tests, covers full ADR-008 state-transition matrix
+    SnoozeOpsTest.kt          ← 12 tests, covers snooze state-transition matrix
 logo/
   check.svg                   ← source artwork (Affinity Designer export)
   check.af                    ← Affinity Designer source file
@@ -89,7 +98,8 @@ logo/
                                   scales to 72dp safe zone, outputs 5 XML files)
 app/
   release-notes.txt           ← edit before each Firebase distribution; script refuses
-                                 to run if this is empty
+                                 to run if this is empty. ASCII only — non-ASCII chars
+                                 produce mojibake in the Firebase CLI output.
 scripts/
   distribute.ps1              ← builds debug APK + uploads to Firebase App Distribution
                                  reads firebase.appId and firebase.testers from
@@ -97,7 +107,7 @@ scripts/
 docs/
   spec.md
   plan.md                     ← Phases 1 & 2 marked COMPLETE; Phase 3 DEFERRED
-  adr/001-009
+  adr/001-010
   setup.md
 ```
 
@@ -136,18 +146,38 @@ docs/
 - Android ignores importance changes on existing channels. Bump the channel ID (we used `next_top_task_v2`) and delete the old one in `ensureChannel()`.
 - Android 13+ lets users swipe foreground-service notifications. Fix: set `deleteIntent` → `NotificationDismissedReceiver` → `TopTaskService.start()` → `onStartCommand` re-posts `lastNotification` via `startForeground()`. Guard with an `observing` flag so the Flow is only collected once.
 
+### SCHEDULE_EXACT_ALARM permission
+- On Android 13+ with apps targeting SDK 33+, `SCHEDULE_EXACT_ALARM` is **not** auto-granted at install (unlike API 31-32 where it was). Calling `setExactAndAllowWhileIdle` without it throws `SecurityException`, which silently kills the scheduling coroutine — the emitter is saved to DB but no alarm is ever set. Symptom: emitters show "Daily · Now" forever, no tasks emitted.
+- Fix: always call `alarmManager.canScheduleExactAlarms()` first. If false, fall back to `setAndAllowWhileIdle` (inexact, fires within a few minutes). See `AlarmScheduler.kt`.
+- The UI shows a tappable warning banner (`AlarmPermissionBanner`) when emitters exist but the permission isn't granted. It deep-links to `Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM`.
+- `ListViewModel.init` calls `processEmissions(now)` on every app open as a safety net — catches up on any missed firings regardless of alarm permission state.
+- `BootReceiver` also calls `processEmissions` on boot before rescheduling, to handle emissions due while the device was off.
+
 ### Firebase App Distribution
 - Use the **Firebase CLI**, not the Gradle plugin. `firebase-appdistribution-gradle` 5.0.0
   expects AGP's legacy `AppExtension` which was removed in AGP 9.x — it hard-crashes at
   sync time. The CLI (`firebase appdistribution:distribute ...`) has no such dependency.
 - Private config lives in `local.properties` (already gitignored):
-  `firebase.appId` and `firebase.testers` (Elly's email).
+  `firebase.appId` and `firebase.testers` (Elly's email: elly.conley@gmail.com).
 - Firebase project: `next-for-elly`
   (console.firebase.google.com/project/next-for-elly/appdistribution)
-- Workflow: edit `app/release-notes.txt`, then run `.\scripts\distribute.ps1`.
+- Workflow: edit `app/release-notes.txt`, commit, then run `.\scripts\distribute.ps1`.
   The script validates config, builds the APK, and uploads in one shot.
-- First build was successfully distributed. Elly uses the **Firebase App Tester** app
-  on her phone to receive and install new builds.
+- **release-notes.txt must be ASCII only.** Non-ASCII characters (arrows, emoji, etc.)
+  produce mojibake in the Firebase CLI terminal output. The notes themselves appear
+  correctly in the App Tester UI — but keep it clean to avoid confusion.
+- Elly uses the **Firebase App Tester** app on her phone to receive and install builds.
+
+### Git-derived versioning
+- `versionCode` = `git rev-list --count HEAD` — monotonically increasing integer, never
+  needs a manual bump. Every commit increments it.
+- `versionName` = `git describe --tags --always --dirty` — shows the nearest tag (e.g.
+  `v1.2`), or `v1.2-4-gabc1234` for 4 commits past that tag, or just the short hash
+  when no tags exist. `-dirty` is appended when there are uncommitted changes.
+- To name a release cleanly: `git tag v1.2` on the commit, then distribute.
+- Implementation in `app/build.gradle.kts` uses `ProcessBuilder` (not `exec {}`).
+  `exec {}` is not in scope for top-level functions in Kotlin DSL — it requires
+  `project.exec {}` or a project receiver.
 
 ### Icon pipeline (`logo/gen_icons.py`)
 - The source SVG uses a general affine matrix with shear — Android `<vector>` `<group>` only supports translate/rotate/scale, **not** shear. The script bakes all transforms (outer translate + inner shear matrix) directly into the path coordinates.
