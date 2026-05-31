@@ -1,8 +1,29 @@
+import java.io.ByteArrayOutputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
+
+// ── Git-derived versioning ────────────────────────────────────────────────────
+// versionCode: total commit count — monotonically increasing, never needs a manual bump.
+// versionName: `git describe` — shows the nearest tag (e.g. "v1.1"), or
+//              "v1.1-4-gabc1234" for 4 commits past that tag, or just the
+//              short hash when no tags exist yet. "-dirty" appended for
+//              uncommitted changes. Tag a commit to give a build a clean name.
+fun git(vararg args: String): String = try {
+    ProcessBuilder("git", *args)
+        .directory(rootProject.projectDir)
+        .start()
+        .inputStream
+        .bufferedReader()
+        .readText()
+        .trim()
+} catch (_: Exception) { "" }
+
+fun gitRevCount(): Int = git("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
+fun gitDescribe(): String = git("describe", "--tags", "--always", "--dirty").ifEmpty { "dev" }
 
 android {
     namespace = "com.oddley.next"
@@ -16,8 +37,8 @@ android {
         applicationId = "com.oddley.next"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = gitRevCount()
+        versionName = gitDescribe()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,6 +58,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     testOptions {
         unitTests.all { it.useJUnitPlatform() }

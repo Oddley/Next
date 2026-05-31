@@ -1,8 +1,11 @@
-New: Scheduled Tasks! You can now set tasks to automatically reappear on a schedule.
+v1.1 — Scheduled task fixes + diagnostics
 
-- Tap "+ Schedule New Task" to create a scheduled reminder
-- Choose one-time or repeating (daily, weekly, monthly)
-- When it's time, the task pops back to the top of your list automatically
-- Tap any scheduled task to edit or delete it
-
-Everything else works the same as before.
+- Fixed: scheduled tasks were not emitting into the task list. Root cause was a missing
+  alarm permission (Android 13+ requires explicit grant for exact alarms). The app now
+  falls back to inexact alarms automatically, and also catches up on missed emissions
+  every time you open the app.
+- New: tap the ⋮ menu (top right) → "Report Issue" to open a GitHub issue, or
+  "Submit Log" to share a diagnostic log file.
+- New: version number shown under the app title so you know which build you're on.
+- New: if scheduled tasks still aren't working, a warning banner appears with a link
+  to grant the Alarms & reminders permission.

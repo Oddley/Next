@@ -1,5 +1,6 @@
 package com.oddley.next.data
 
+import android.util.Log
 import com.oddley.next.domain.emitter.TaskEmitter
 import com.oddley.next.domain.emitter.advanceEmitter
 import com.oddley.next.domain.emitter.computeNextEmission
@@ -78,6 +79,7 @@ class EmitterRepository(
     suspend fun processEmissions(now: Long): Boolean {
         val emitters = dao.getAllOnce().map { it.toDomain() }
         val due = emitters.filter { shouldEmit(it, now) }
+        Log.d("EmitterRepository", "processEmissions: ${emitters.size} emitters, ${due.size} due at $now")
         if (due.isEmpty()) return false
 
         val tasks = taskDao.getAllOnce().map { it.toDomain() }
@@ -88,6 +90,7 @@ class EmitterRepository(
         for (emitter in due) {
             val existingTask = tasks.firstOrNull { it.emitterId == emitter.id }
             if (existingTask != null) {
+                Log.d("EmitterRepository", "resurface task ${existingTask.id} for emitter ${emitter.id} (${emitter.label})")
                 // Resurface: uncross, unsnooze, move to top
                 taskDao.update(
                     existingTask.copy(
@@ -97,6 +100,7 @@ class EmitterRepository(
                     ).toEntity()
                 )
             } else {
+                Log.d("EmitterRepository", "insert new task for emitter ${emitter.id} (${emitter.label})")
                 // Create a fresh task linked to this emitter
                 taskDao.insert(
                     TaskEntity(
@@ -112,6 +116,7 @@ class EmitterRepository(
 
             // Advance the emitter to its next occurrence
             val advanced = advanceEmitter(emitter, now)
+            Log.d("EmitterRepository", "advance emitter ${emitter.id}: ${emitter.nextEmission} → ${advanced.nextEmission}")
             dao.update(advanced.toEntity())
         }
 

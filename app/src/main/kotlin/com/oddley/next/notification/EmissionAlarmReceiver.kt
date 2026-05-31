@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.oddley.next.app.NextApplication
+import com.oddley.next.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -17,14 +18,18 @@ import kotlinx.coroutines.launch
 class EmissionAlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        AppLogger.log(context, "EmissionAlarmReceiver", "alarm fired")
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val app = context.applicationContext as NextApplication
                 val now = System.currentTimeMillis()
-                app.emitterRepository.processEmissions(now)
+                val fired = app.emitterRepository.processEmissions(now)
+                AppLogger.log(context, "EmissionAlarmReceiver", "processEmissions fired=$fired")
                 val nextMs = app.emitterRepository.earliestNextEmission()
                 AlarmScheduler.scheduleNext(context, nextMs)
+            } catch (e: Exception) {
+                AppLogger.log(context, "EmissionAlarmReceiver", "ERROR: ${e::class.simpleName}: ${e.message}")
             } finally {
                 pendingResult.finish()
             }

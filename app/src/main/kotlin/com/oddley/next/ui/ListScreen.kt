@@ -1,5 +1,10 @@
 package com.oddley.next.ui
 
+import android.app.AlarmManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,12 +30,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -63,13 +72,16 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.oddley.next.BuildConfig
 import com.oddley.next.domain.emitter.TaskEmitter
 import com.oddley.next.domain.task.NullTask
 import com.oddley.next.domain.task.Task
+import com.oddley.next.util.AppLogger
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.text.SimpleDateFormat
@@ -183,8 +195,55 @@ fun ListScreen(
     onUpdateEmitter: (TaskEmitter) -> Unit,
     onDeleteEmitter: (Long) -> Unit,
 ) {
+    val context = LocalContext.current
+    var showMenu by remember { mutableStateOf(false) }
+
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Next") }) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Next")
+                        Text(
+                            BuildConfig.VERSION_NAME,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                        )
+                    }
+                },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Report Issue") },
+                                onClick = {
+                                    showMenu = false
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Oddley/Next/issues/new"))
+                                    )
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Submit Log") },
+                                onClick = {
+                                    showMenu = false
+                                    val log = AppLogger.readRecent(context)
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "Next App Debug Log (v${BuildConfig.VERSION_NAME})")
+                                        putExtra(Intent.EXTRA_TEXT, log)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share log"))
+                                },
+                            )
+                        }
+                    }
+                },
+            )
+        },
     ) { paddingValues ->
         SectionedList(
             modifier = Modifier
@@ -224,6 +283,11 @@ private fun SectionedList(
     onUpdateEmitter: (TaskEmitter) -> Unit,
     onDeleteEmitter: (Long) -> Unit,
 ) {
+    val context = LocalContext.current
+    val exactAlarmGranted = remember {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.canScheduleExactAlarms()
+    }
     val lazyListState = rememberLazyListState()
     var showAddRow by remember { mutableStateOf(false) }
 
@@ -377,6 +441,13 @@ private fun SectionedList(
             }
         }
 
+        // ── Alarm permission warning ─────────────────────────────────────────
+        if (uiState.emitters.isNotEmpty() && !exactAlarmGranted) {
+            item(key = "alarm_permission_warning") {
+                AlarmPermissionBanner(context = context)
+            }
+        }
+
         // ── Scheduled Tasks ───────────────────────────────────────────────────
         if (uiState.emitters.isEmpty()) {
             item(key = "scheduled_empty") {
@@ -456,6 +527,43 @@ private fun SectionedList(
 }
 
 // ── Section chrome ────────────────────────────────────────────────────────────
+
+@Composable
+private fun AlarmPermissionBanner(context: Context) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .clickable {
+                context.startActivity(
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                )
+            }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Default.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Scheduled tasks need Alarms permission",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                "Tap to grant — without it, tasks may fire late",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f),
+            )
+        }
+    }
+}
 
 @Composable
 private fun CollapsibleSectionHeader(

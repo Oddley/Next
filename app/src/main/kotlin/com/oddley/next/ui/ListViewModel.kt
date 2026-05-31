@@ -2,6 +2,7 @@ package com.oddley.next.ui
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -42,6 +43,20 @@ class ListViewModel(
 ) : AndroidViewModel(application) {
 
     private val appContext: Context get() = getApplication<Application>().applicationContext
+
+    init {
+        // On every app open, catch up on any emissions that were missed while the app
+        // was closed — covers the case where an alarm failed to fire (e.g., exact alarm
+        // permission not yet granted) or the device was rebooted.
+        viewModelScope.launch {
+            try {
+                val fired = emitterRepository.processEmissions(System.currentTimeMillis())
+                if (fired) rescheduleAlarm()
+            } catch (e: Exception) {
+                Log.e("ListViewModel", "processEmissions on init failed", e)
+            }
+        }
+    }
 
     val uiState: StateFlow<ListUiState> = combine(
         taskRepository.tasks,
