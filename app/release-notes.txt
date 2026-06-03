@@ -1,11 +1,9 @@
-v1.1 — Scheduled task fixes + diagnostics
+Bug fixes for issues #4 and #5.
 
-- Fixed: scheduled tasks were not emitting into the task list. Root cause was a missing
-  alarm permission (Android 13+ requires explicit grant for exact alarms). The app now
-  falls back to inexact alarms automatically, and also catches up on missed emissions
-  every time you open the app.
-- New: tap the ⋮ menu (top right) → "Report Issue" to open a GitHub issue, or
-  "Submit Log" to share a diagnostic log file.
-- New: version number shown under the app title so you know which build you're on.
-- New: if scheduled tasks still aren't working, a warning banner appears with a link
-  to grant the Alarms & reminders permission.
+- Fix #5: notification could show "All caught up" even when tasks exist.
+  Emission alarm now restarts the notification service if the OS killed it
+  while no tasks were active.
+
+- Fix #4: scheduled task times (Today/Tomorrow) now refresh every minute
+  in the list, so the label updates correctly after midnight instead of
+  staying stale until the next emission fires.

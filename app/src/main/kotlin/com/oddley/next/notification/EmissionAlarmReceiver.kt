@@ -26,6 +26,10 @@ class EmissionAlarmReceiver : BroadcastReceiver() {
                 val now = System.currentTimeMillis()
                 val fired = app.emitterRepository.processEmissions(now)
                 AppLogger.log(context, "EmissionAlarmReceiver", "processEmissions fired=$fired")
+                // Ensure the notification service is running so it picks up the new task.
+                // If the OS killed it while there were no tasks, it won't be observing the
+                // Room Flow and the notification would stay stale ("All caught up").
+                TopTaskService.start(context)
                 val nextMs = app.emitterRepository.earliestNextEmission()
                 AlarmScheduler.scheduleNext(context, nextMs)
             } catch (e: Exception) {

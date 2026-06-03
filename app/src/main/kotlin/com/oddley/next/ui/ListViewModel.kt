@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.oddley.next.data.EmitterRepository
 import com.oddley.next.data.TaskRepository
+import com.oddley.next.data.UiPrefsEntity
 import com.oddley.next.data.UiPrefsRepository
 import com.oddley.next.domain.emitter.TaskEmitter
 import com.oddley.next.domain.task.NullTask
@@ -16,9 +17,12 @@ import com.oddley.next.domain.task.activeTasks
 import com.oddley.next.domain.task.computeNext
 import com.oddley.next.domain.task.crossedOffTasks
 import com.oddley.next.notification.AlarmScheduler
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -33,6 +37,13 @@ data class ListUiState(
     val tasksExpanded: Boolean = true,
     val emittersExpanded: Boolean = true,
     val completedExpanded: Boolean = false,
+    /**
+     * Current epoch-ms, updated every minute by [ListViewModel.clockTick].
+     * Not consumed directly by the UI — its presence in the data class causes
+     * StateFlow to emit (and Compose to recompose) each tick, keeping
+     * time-relative strings like "Today / Tomorrow" in EmitterRow fresh.
+     */
+    val currentTimeMs: Long = System.currentTimeMillis(),
 )
 
 class ListViewModel(
@@ -43,6 +54,18 @@ class ListViewModel(
 ) : AndroidViewModel(application) {
 
     private val appContext: Context get() = getApplication<Application>().applicationContext
+
+    /**
+     * Emits [System.currentTimeMillis] once per minute. Included in the [uiState]
+     * combine so Compose recomposes time-sensitive strings (e.g. "Today/Tomorrow"
+     * in emitter rows) even when the underlying DB data hasn't changed.
+     */
+    private val clockTick: Flow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(60_000L)
+        }
+    }
 
     init {
         // On every app open, catch up on any emissions that were missed while the app
@@ -62,15 +85,17 @@ class ListViewModel(
         taskRepository.tasks,
         emitterRepository.emitters,
         uiPrefsRepository.prefs,
-    ) { tasks, emitters, prefs ->
+        clockTick,
+    ) { tasks: List<Task>, emitters: List<TaskEmitter>, prefs: UiPrefsEntity, now: Long ->
         ListUiState(
-            nextTask = computeNext(tasks, System.currentTimeMillis()),
+            nextTask = computeNext(tasks, now),
             activeTasks = activeTasks(tasks),
             crossedOffTasks = crossedOffTasks(tasks),
             emitters = emitters,
             tasksExpanded = prefs.tasksExpanded,
             emittersExpanded = prefs.emittersExpanded,
             completedExpanded = prefs.completedExpanded,
+            currentTimeMs = now,
         )
     }.stateIn(
         scope = viewModelScope,
