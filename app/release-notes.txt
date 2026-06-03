@@ -1,9 +1,12 @@
-Bug fixes for issues #4 and #5.
+Issue #3 - Custom recurrence options.
 
-- Fix #5: notification could show "All caught up" even when tasks exist.
-  Emission alarm now restarts the notification service if the OS killed it
-  while no tasks were active.
+New "Custom..." option in the recurrence picker:
 
-- Fix #4: scheduled task times (Today/Tomorrow) now refresh every minute
-  in the list, so the label updates correctly after midnight instead of
-  staying stale until the next emission fires.
+- Every N hours (no sub-options)
+- Every N days
+- Every N weeks (with day-of-week chip selector)
+- Every N months:
+    - Same date each month (e.g. the 15th), or
+    - Day of week of month (e.g. "2nd Tuesday")
+
+Existing Daily / Weekly / Monthly quick-picks are unchanged.

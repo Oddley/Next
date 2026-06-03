@@ -97,6 +97,7 @@ private enum class RecurrenceMode(val label: String) {
     DAILY("Daily"),
     WEEKLY("Weekly"),
     MONTHLY("Monthly"),
+    CUSTOM("Custom..."),
 }
 
 private enum class EndCondition(val label: String) {
@@ -105,52 +106,111 @@ private enum class EndCondition(val label: String) {
     UNTIL_DATE("Until date"),
 }
 
-private val WEEKDAY_CODES = listOf("MO", "TU", "WE", "TH", "FR", "SA", "SU")
-private val WEEKDAY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
+/** Unit options for the Custom recurrence interval. */
+private enum class CustomUnit(val label: String) {
+    HOURS("Hours"),
+    DAYS("Days"),
+    WEEKS("Weeks"),
+    MONTHS("Months"),
+}
+
+/** How a monthly Custom recurrence anchors to the calendar. */
+private enum class MonthlyOption {
+    SAME_DAY,    // fires on the same date each month (e.g. the 15th)
+    DAY_OF_WEEK, // fires on e.g. the "2nd Tuesday"
+}
+
+private val WEEKDAY_CODES  = listOf("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+private val WEEKDAY_LABELS = listOf("M",  "T",  "W",  "T",  "F",  "Sa", "Su")
+private val DAY_NAMES      = listOf("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")
+private val ORDINALS       = listOf(1, 2, 3, 4, -1)
+private val ORDINAL_LABELS = listOf("1st", "2nd", "3rd", "4th", "Last")
+
+/** Extracts the INTERVAL= value from an RRULE string; returns 1 when absent. */
+private fun rruleInterval(rrule: String): Int =
+    Regex("INTERVAL=(\\d+)").find(rrule)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
 /** Builds an RFC 5545 RRULE string from UI selections. */
 private fun buildRrule(
     mode: RecurrenceMode,
-    selectedDays: Set<Int>,          // indices into WEEKDAY_CODES
+    selectedDays: Set<Int>,             // indices into WEEKDAY_CODES (used by WEEKLY / CUSTOM+Weeks)
     endCondition: EndCondition,
     count: Int,
-    until: Long?,                    // epoch ms
+    until: Long?,                       // epoch ms
+    // ── Custom mode params (ignored for non-CUSTOM modes) ──────────────────
+    customUnit: CustomUnit = CustomUnit.DAYS,
+    customInterval: Int = 2,
+    monthlyOption: MonthlyOption = MonthlyOption.SAME_DAY,
+    monthlyOrdinal: Int = 1,            // 1–4 or -1 (Last)
+    monthlyDayIndex: Int = 0,           // index into WEEKDAY_CODES
 ): String {
+    // Shared end-condition appender
+    fun StringBuilder.appendEnd() {
+        when (endCondition) {
+            EndCondition.FOREVER -> {}
+            EndCondition.AFTER_COUNT -> append(";COUNT=${count.coerceAtLeast(1)}")
+            EndCondition.UNTIL_DATE -> {
+                if (until != null) {
+                    val sdf = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }
+                    append(";UNTIL=${sdf.format(Date(until))}T000000Z")
+                }
+            }
+        }
+    }
+
+    if (mode == RecurrenceMode.ONE_TIME) return "FREQ=DAILY;COUNT=1"
+
+    if (mode == RecurrenceMode.CUSTOM) {
+        val freq = when (customUnit) {
+            CustomUnit.HOURS  -> "HOURLY"
+            CustomUnit.DAYS   -> "DAILY"
+            CustomUnit.WEEKS  -> "WEEKLY"
+            CustomUnit.MONTHS -> "MONTHLY"
+        }
+        val sb = StringBuilder("FREQ=$freq;INTERVAL=${customInterval.coerceAtLeast(1)}")
+        when (customUnit) {
+            CustomUnit.WEEKS ->
+                if (selectedDays.isNotEmpty())
+                    sb.append(";BYDAY=${selectedDays.sorted().joinToString(",") { WEEKDAY_CODES[it] }}")
+            CustomUnit.MONTHS ->
+                if (monthlyOption == MonthlyOption.DAY_OF_WEEK) {
+                    val ord = if (monthlyOrdinal == -1) "-1" else monthlyOrdinal.toString()
+                    sb.append(";BYDAY=${ord}${WEEKDAY_CODES[monthlyDayIndex]}")
+                }
+            else -> {}
+        }
+        sb.appendEnd()
+        return sb.toString()
+    }
+
+    // Quick-pick modes (DAILY / WEEKLY / MONTHLY)
     val freq = when (mode) {
-        RecurrenceMode.ONE_TIME -> return "FREQ=DAILY;COUNT=1"
-        RecurrenceMode.DAILY -> "DAILY"
-        RecurrenceMode.WEEKLY -> "WEEKLY"
+        RecurrenceMode.DAILY   -> "DAILY"
+        RecurrenceMode.WEEKLY  -> "WEEKLY"
         RecurrenceMode.MONTHLY -> "MONTHLY"
+        else -> "DAILY" // unreachable
     }
     val sb = StringBuilder("FREQ=$freq")
     if (mode == RecurrenceMode.WEEKLY && selectedDays.isNotEmpty()) {
         sb.append(";BYDAY=${selectedDays.sorted().joinToString(",") { WEEKDAY_CODES[it] }}")
     }
-    when (endCondition) {
-        EndCondition.FOREVER -> {}
-        EndCondition.AFTER_COUNT -> sb.append(";COUNT=${count.coerceAtLeast(1)}")
-        EndCondition.UNTIL_DATE -> {
-            if (until != null) {
-                // DatePicker returns midnight UTC — format in UTC to get the correct date string.
-                val sdf = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }
-                sb.append(";UNTIL=${sdf.format(Date(until))}T000000Z")
-            }
-        }
-    }
+    sb.appendEnd()
     return sb.toString()
 }
 
 /** Human-readable summary of an emitter's schedule. */
 private fun scheduleDescription(emitter: TaskEmitter): String {
     val nextMs = emitter.nextEmission ?: return "Completed"
-    val rrule = emitter.rrule
+    val rrule  = emitter.rrule
+    val n      = rruleInterval(rrule)
     val freq = when {
-        rrule.contains("COUNT=1") -> "One-time"
-        rrule.contains("FREQ=DAILY") -> "Daily"
-        rrule.contains("FREQ=WEEKLY") -> "Weekly"
-        rrule.contains("FREQ=MONTHLY") -> "Monthly"
+        rrule.contains("COUNT=1")      -> "One-time"
+        rrule.contains("FREQ=HOURLY")  -> if (n == 1) "Hourly"   else "Every $n hours"
+        rrule.contains("FREQ=DAILY")   -> if (n == 1) "Daily"    else "Every $n days"
+        rrule.contains("FREQ=WEEKLY")  -> if (n == 1) "Weekly"   else "Every $n weeks"
+        rrule.contains("FREQ=MONTHLY") -> if (n == 1) "Monthly"  else "Every $n months"
         else -> ""
     }
     val nextStr = formatNextEmission(nextMs)
@@ -890,21 +950,64 @@ private fun EmitterDialog(
             when {
                 emitter == null -> RecurrenceMode.ONE_TIME
                 emitter.rrule.contains("COUNT=1") -> RecurrenceMode.ONE_TIME
-                emitter.rrule.contains("FREQ=DAILY") -> RecurrenceMode.DAILY
-                emitter.rrule.contains("FREQ=WEEKLY") -> RecurrenceMode.WEEKLY
-                emitter.rrule.contains("FREQ=MONTHLY") -> RecurrenceMode.MONTHLY
-                else -> RecurrenceMode.ONE_TIME
+                emitter.rrule.contains("FREQ=DAILY")   && rruleInterval(emitter.rrule) == 1 -> RecurrenceMode.DAILY
+                emitter.rrule.contains("FREQ=WEEKLY")  && rruleInterval(emitter.rrule) == 1 -> RecurrenceMode.WEEKLY
+                emitter.rrule.contains("FREQ=MONTHLY") && rruleInterval(emitter.rrule) == 1 -> RecurrenceMode.MONTHLY
+                else -> RecurrenceMode.CUSTOM
             }
         )
     }
 
-    // Weekly day selection (bit flags by WEEKDAY_CODES index)
+    // Weekly / Custom-weeks day selection (indices into WEEKDAY_CODES)
     var selectedDays by rememberSaveable {
         mutableStateOf(
             if (emitter != null && emitter.rrule.contains("BYDAY=")) {
+                // Weekly BYDAY is comma-separated codes with no ordinal prefix (e.g. "MO,WE").
+                // Monthly DAY_OF_WEEK BYDAY has an ordinal prefix (e.g. "2TU") — skip those.
                 val byday = emitter.rrule.substringAfter("BYDAY=").substringBefore(";")
-                byday.split(",").mapNotNull { code -> WEEKDAY_CODES.indexOf(code).takeIf { it >= 0 } }.toSet()
+                byday.split(",")
+                    .filter { it.first().isLetter() }   // skip ordinal entries like "2TU"
+                    .mapNotNull { code -> WEEKDAY_CODES.indexOf(code).takeIf { it >= 0 } }
+                    .toSet()
             } else setOf()
+        )
+    }
+
+    // ── Custom recurrence state ────────────────────────────────────────────────
+    var customUnit by rememberSaveable {
+        mutableStateOf(
+            when {
+                emitter == null -> CustomUnit.DAYS
+                emitter.rrule.contains("FREQ=HOURLY")  -> CustomUnit.HOURS
+                emitter.rrule.contains("FREQ=WEEKLY")  -> CustomUnit.WEEKS
+                emitter.rrule.contains("FREQ=MONTHLY") -> CustomUnit.MONTHS
+                else -> CustomUnit.DAYS
+            }
+        )
+    }
+    var customIntervalText by rememberSaveable {
+        mutableStateOf(
+            emitter?.rrule?.let { r -> rruleInterval(r).takeIf { it > 1 }?.toString() } ?: "2"
+        )
+    }
+    // Monthly sub-option: same calendar date vs. day-of-week-of-month
+    val initialMonthlyByday = emitter?.rrule?.let { r ->
+        Regex("BYDAY=(-?\\d+)([A-Z]{2})").find(r)
+    }
+    var monthlyOption by rememberSaveable {
+        mutableStateOf(
+            if (initialMonthlyByday != null) MonthlyOption.DAY_OF_WEEK else MonthlyOption.SAME_DAY
+        )
+    }
+    var monthlyOrdinal by rememberSaveable {
+        mutableIntStateOf(
+            initialMonthlyByday?.groupValues?.get(1)?.toIntOrNull() ?: 1
+        )
+    }
+    var monthlyDayIndex by rememberSaveable {
+        mutableIntStateOf(
+            initialMonthlyByday?.groupValues?.get(2)
+                ?.let { WEEKDAY_CODES.indexOf(it).coerceAtLeast(0) } ?: 0
         )
     }
 
@@ -916,6 +1019,8 @@ private fun EmitterDialog(
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
     var showUntilDatePicker by remember { mutableStateOf(false) }
+    var showOrdinalPicker by remember { mutableStateOf(false) }
+    var showMonthlyDayPicker by remember { mutableStateOf(false) }
 
     // ── DatePicker for first occurrence ───────────────────────────────────────
     if (showDatePicker) {
@@ -991,6 +1096,64 @@ private fun EmitterDialog(
         }
     }
 
+    // ── Ordinal picker (1st / 2nd / 3rd / 4th / Last) ────────────────────────
+    if (showOrdinalPicker) {
+        AlertDialog(
+            onDismissRequest = { showOrdinalPicker = false },
+            title = { Text("Repeat on the…") },
+            text = {
+                Column {
+                    ORDINALS.forEachIndexed { i, ord ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { monthlyOrdinal = ord; showOrdinalPicker = false },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = monthlyOrdinal == ord,
+                                onClick = { monthlyOrdinal = ord; showOrdinalPicker = false },
+                            )
+                            Text(ORDINAL_LABELS[i], style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showOrdinalPicker = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // ── Monthly day-of-week picker (Monday … Sunday) ──────────────────────────
+    if (showMonthlyDayPicker) {
+        AlertDialog(
+            onDismissRequest = { showMonthlyDayPicker = false },
+            title = { Text("Day of week") },
+            text = {
+                Column {
+                    DAY_NAMES.forEachIndexed { i, name ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { monthlyDayIndex = i; showMonthlyDayPicker = false },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = monthlyDayIndex == i,
+                                onClick = { monthlyDayIndex = i; showMonthlyDayPicker = false },
+                            )
+                            Text(name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showMonthlyDayPicker = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     // ── Main dialog ───────────────────────────────────────────────────────────
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1058,7 +1221,7 @@ private fun EmitterDialog(
                     }
                 }
 
-                // Weekly day selector
+                // Weekly day selector (quick-pick mode)
                 if (recurrenceMode == RecurrenceMode.WEEKLY) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         WEEKDAY_LABELS.forEachIndexed { index, dayLabel ->
@@ -1073,6 +1236,101 @@ private fun EmitterDialog(
                                 },
                                 label = { Text(dayLabel) },
                             )
+                        }
+                    }
+                }
+
+                // ── Custom recurrence options ─────────────────────────────────
+                if (recurrenceMode == RecurrenceMode.CUSTOM) {
+                    // "Every [N] [unit chips]" row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Every", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(
+                            value = customIntervalText,
+                            onValueChange = { v ->
+                                if (v.all { it.isDigit() } && v.length <= 3) customIntervalText = v
+                            },
+                            modifier = Modifier.width(64.dp),
+                            singleLine = true,
+                        )
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        CustomUnit.entries.forEach { unit ->
+                            FilterChip(
+                                selected = customUnit == unit,
+                                onClick = { customUnit = unit },
+                                label = { Text(unit.label) },
+                            )
+                        }
+                    }
+
+                    // Weeks: day-of-week chips (reuse selectedDays)
+                    if (customUnit == CustomUnit.WEEKS) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            WEEKDAY_LABELS.forEachIndexed { index, dayLabel ->
+                                FilterChip(
+                                    selected = index in selectedDays,
+                                    onClick = {
+                                        selectedDays = if (index in selectedDays)
+                                            selectedDays - index else selectedDays + index
+                                    },
+                                    label = { Text(dayLabel) },
+                                )
+                            }
+                        }
+                    }
+
+                    // Months: same date vs. day-of-week-of-month
+                    if (customUnit == CustomUnit.MONTHS) {
+                        Text(
+                            "Repeats on",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        val dayOfMonth = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                            .apply { timeInMillis = selectedDateMs }
+                            .get(Calendar.DAY_OF_MONTH)
+                        Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { monthlyOption = MonthlyOption.SAME_DAY },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(
+                                    selected = monthlyOption == MonthlyOption.SAME_DAY,
+                                    onClick = { monthlyOption = MonthlyOption.SAME_DAY },
+                                )
+                                Text(
+                                    "Day $dayOfMonth of the month",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { monthlyOption = MonthlyOption.DAY_OF_WEEK },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(
+                                    selected = monthlyOption == MonthlyOption.DAY_OF_WEEK,
+                                    onClick = { monthlyOption = MonthlyOption.DAY_OF_WEEK },
+                                )
+                                Text("Day of week", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        if (monthlyOption == MonthlyOption.DAY_OF_WEEK) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { showOrdinalPicker = true }) {
+                                    Text(ORDINAL_LABELS[ORDINALS.indexOf(monthlyOrdinal).coerceAtLeast(0)])
+                                }
+                                OutlinedButton(onClick = { showMonthlyDayPicker = true }) {
+                                    Text(DAY_NAMES[monthlyDayIndex])
+                                }
+                            }
                         }
                     }
                 }
@@ -1170,6 +1428,11 @@ private fun EmitterDialog(
                                 EndCondition.FOREVER else endCondition,
                             count = countText.toIntOrNull() ?: 1,
                             until = untilDateMs,
+                            customUnit = customUnit,
+                            customInterval = customIntervalText.toIntOrNull()?.coerceAtLeast(1) ?: 1,
+                            monthlyOption = monthlyOption,
+                            monthlyOrdinal = monthlyOrdinal,
+                            monthlyDayIndex = monthlyDayIndex,
                         )
                         onConfirm(label.trim(), rrule, dtStart)
                     },
