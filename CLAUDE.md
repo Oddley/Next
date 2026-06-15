@@ -64,6 +64,9 @@ app/src/main/
       SnoozeReceiver.kt
       BootReceiver.kt         ← restarts service + calls processEmissions on reboot
       NotificationDismissedReceiver.kt ← re-anchors when user swipes (Android 13+)
+      SnoozeAlarmScheduler.kt      ← schedules/cancels the snooze wake alarm (request code 1002)
+      SnoozeAlarmReceiver.kt       ← on fire: clears expired snoozedUntil in DB, reschedules;
+                                      DB write triggers Room Flow → TopTaskService refreshes
       CLAUDE.md
     util/
       AppLogger.kt            ← file logger; AppLogger.log(context, tag, msg) appends to
@@ -145,6 +148,12 @@ docs/
 - `IMPORTANCE_LOW` → "Silent" section (no badge, no sound, and visually demoted). Use `IMPORTANCE_DEFAULT` + `setSound(null, null)` + `enableVibration(false)` to land in "Alerting" without making noise.
 - Android ignores importance changes on existing channels. Bump the channel ID (we used `next_top_task_v2`) and delete the old one in `ensureChannel()`.
 - Android 13+ lets users swipe foreground-service notifications. Fix: set `deleteIntent` → `NotificationDismissedReceiver` → `TopTaskService.start()` → `onStartCommand` re-posts `lastNotification` via `startForeground()`. Guard with an `observing` flag so the Flow is only collected once.
+
+### Snooze wake alarm
+- When a snooze expires, the Room tasks Flow does **not** automatically emit — the DB value didn't change. `TopTaskService` only refreshes when the Flow emits, so the notification stays stale forever without a separate alarm.
+- Fix: `SnoozeReceiver` schedules a `SnoozeAlarmScheduler` alarm for `now + SNOOZE_DURATION_MS`. When it fires, `SnoozeAlarmReceiver` calls `TaskDao.clearExpiredSnoozes(now)` (a direct SQL UPDATE), which does trigger the Flow. The service re-evaluates and the notification updates.
+- `BootReceiver` also calls `clearExpiredSnoozes(now)` + `SnoozeAlarmScheduler.scheduleNext()` so snoozes that expired while the device was off are cleared on reboot.
+- Pattern to follow if snooze is added elsewhere: always call `SnoozeAlarmScheduler.scheduleNext(context, taskRepository.earliestFutureSnooze())` after any snooze write.
 
 ### SCHEDULE_EXACT_ALARM permission
 - On Android 13+ with apps targeting SDK 33+, `SCHEDULE_EXACT_ALARM` is **not** auto-granted at install (unlike API 31-32 where it was). Calling `setExactAndAllowWhileIdle` without it throws `SecurityException`, which silently kills the scheduling coroutine — the emitter is saved to DB but no alarm is ever set. Symptom: emitters show "Daily · Now" forever, no tasks emitted.
