@@ -33,6 +33,10 @@ class BootReceiver : BroadcastReceiver() {
                 AppLogger.log(context, "BootReceiver", "processEmissions fired=$fired")
                 val nextMs = app.emitterRepository.earliestNextEmission()
                 AlarmScheduler.scheduleNext(context, nextMs)
+                // Clear any snoozes that expired while device was off, then re-arm wake alarm.
+                app.taskRepository.clearExpiredSnoozes(now)
+                val nextSnoozeWake = app.taskRepository.earliestFutureSnooze()
+                SnoozeAlarmScheduler.scheduleNext(context, nextSnoozeWake)
             } catch (e: Exception) {
                 AppLogger.log(context, "BootReceiver", "ERROR: ${e::class.simpleName}: ${e.message}")
             } finally {

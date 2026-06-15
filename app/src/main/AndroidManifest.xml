@@ -88,6 +88,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Snooze wake: fires when the earliest active snooze expires -->
+        <receiver
+            android:name=".notification.SnoozeAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.oddley.next.SNOOZE_ALARM" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

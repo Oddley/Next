@@ -43,4 +43,8 @@ interface TaskDao {
     /** Deletes all crossed-off tasks. */
     @Query("DELETE FROM tasks WHERE crossedOff = 1")
     suspend fun deleteAllCrossedOff()
+
+    /** Clears snoozedUntil on all tasks whose snooze has expired. */
+    @Query("UPDATE tasks SET snoozedUntil = NULL WHERE snoozedUntil IS NOT NULL AND snoozedUntil <= :now")
+    suspend fun clearExpiredSnoozes(now: Long)
 }

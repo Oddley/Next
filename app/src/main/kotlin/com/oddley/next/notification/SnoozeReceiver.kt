@@ -32,6 +32,9 @@ class SnoozeReceiver : BroadcastReceiver() {
                 val top = computeNext(tasks, now)
                 if (top != NullTask) {
                     app.taskRepository.snoozeTask(top.id, now + SNOOZE_DURATION_MS)
+                    // Schedule wake alarm so the task re-enters the queue when snooze expires.
+                    val nextWake = app.taskRepository.earliestFutureSnooze()
+                    SnoozeAlarmScheduler.scheduleNext(context, nextWake)
                 }
             } finally {
                 pendingResult.finish()

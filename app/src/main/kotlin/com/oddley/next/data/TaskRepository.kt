@@ -125,4 +125,21 @@ class TaskRepository(private val dao: TaskDao) {
         val task = dao.getAllOnce().map { it.toDomain() }.firstOrNull { it.id == id } ?: return
         dao.update(unsnoozeTask(task).toEntity())
     }
+
+    /**
+     * Clears [snoozedUntil] on all tasks whose snooze has expired as of [now].
+     * Triggers the tasks Flow, causing [TopTaskService] to refresh the notification.
+     */
+    suspend fun clearExpiredSnoozes(now: Long) {
+        dao.clearExpiredSnoozes(now)
+    }
+
+    /** Returns the earliest future snooze expiry across all tasks, or null if none. */
+    suspend fun earliestFutureSnooze(): Long? {
+        val now = System.currentTimeMillis()
+        return dao.getAllOnce()
+            .mapNotNull { it.snoozedUntil }
+            .filter { it > now }
+            .minOrNull()
+    }
 }
