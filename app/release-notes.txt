@@ -1,6 +1,7 @@
-Issue #6 - Snoozed tasks now reenter the queue automatically.
+Bug fixes and a new Bump action.
 
-When a task is snoozed, the app now sets an alarm for when the snooze
-expires. When the alarm fires, the task re-enters the notification
-without any manual intervention (no need to open the app or mark it
-complete/uncomplete to trigger a refresh).
+- Fixed: app crashing repeatedly on newer Android versions (Android 14+).
+- Fixed: editing a scheduled task's time now updates immediately in the list.
+- Fixed: scheduled task no longer shows up twice in the list.
+- New: "Bump" button in the notification — sends the current task to the
+  bottom of the list permanently (different from Snooze, which is temporary).
