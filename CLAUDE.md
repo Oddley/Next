@@ -61,6 +61,7 @@ app/src/main/
                                  to setAndAllowWhileIdle if exact alarm not granted
       EmissionAlarmReceiver.kt ← fires when AlarmManager alarm triggers; calls processEmissions
       MarkCompleteReceiver.kt
+      BumpReceiver.kt          ← moves NEXT task to bottom of active list (permanent)
       SnoozeReceiver.kt
       BootReceiver.kt         ← restarts service + calls processEmissions on reboot
       NotificationDismissedReceiver.kt ← re-anchors when user swipes (Android 13+)
@@ -144,6 +145,10 @@ docs/
 - `onFocusChanged` fires with `isFocused = false` immediately on composition, before `requestFocus()` runs. Guard with an `editorFocused: Boolean` flag — only commit/exit when `editorFocused` was already `true`.
 - Use `TextFieldValue` (not `String`) to set `selection = TextRange(0, text.length)` for select-all on enter.
 
+### Foreground service crash loop (Android 14+)
+- Calling the 2-arg `startForeground(id, notification)` on Android 14+ (targeting SDK 34+) when the manifest declares `foregroundServiceType` throws `MissingForegroundServiceTypeException`. Since START_STICKY restarts the service immediately, it crash-loops ("App keeps stopping").
+- Fix: use the 3-arg form `startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)` (API 29+). Since minSdk is 31, no version guard needed. `ServiceCompat.startForeground` was tried but the version of `core-ktx` in use (1.10.1) did not expose it cleanly from Kotlin — stick with the 3-arg `Service` method directly.
+
 ### Notification channel
 - `IMPORTANCE_LOW` → "Silent" section (no badge, no sound, and visually demoted). Use `IMPORTANCE_DEFAULT` + `setSound(null, null)` + `enableVibration(false)` to land in "Alerting" without making noise.
 - Android ignores importance changes on existing channels. Bump the channel ID (we used `next_top_task_v2`) and delete the old one in `ensureChannel()`.
@@ -154,6 +159,15 @@ docs/
 - Fix: `SnoozeReceiver` schedules a `SnoozeAlarmScheduler` alarm for `now + SNOOZE_DURATION_MS`. When it fires, `SnoozeAlarmReceiver` calls `TaskDao.clearExpiredSnoozes(now)` (a direct SQL UPDATE), which does trigger the Flow. The service re-evaluates and the notification updates.
 - `BootReceiver` also calls `clearExpiredSnoozes(now)` + `SnoozeAlarmScheduler.scheduleNext()` so snoozes that expired while the device was off are cleared on reboot.
 - Pattern to follow if snooze is added elsewhere: always call `SnoozeAlarmScheduler.scheduleNext(context, taskRepository.earliestFutureSnooze())` after any snooze write.
+
+### Emitter processEmissions race condition
+- `processEmissions` is called from BOTH `ListViewModel.init` (every app open) AND `EmissionAlarmReceiver` (when the alarm fires). If both execute concurrently and the emitter hasn't fired before, both see `existingTask == null` and each inserts a new task — creating duplicate emitter tasks.
+- Fix: `EmitterRepository` holds an `emissionMutex: Mutex`. `processEmissions` is wrapped in `emissionMutex.withLock { }`, so calls serialize. The second caller always sees the already-advanced emitter and short-circuits.
+- Pattern: any future code path that calls `processEmissions` directly must go through the same `EmitterRepository` instance so the mutex applies.
+
+### Emitter nextEmission after edit
+- `EmitterRepository.updateEmitter` saves whatever `TaskEmitter` is passed to it. If the caller passes the old `nextEmission`, the emitter's scheduled time appears stale in the list even after editing.
+- Fix: `updateEmitter` always recomputes `nextEmission = computeNextEmission(rrule, dtStart, now)` before saving. The UI passes the old `nextEmission` as a placeholder — the repository overwrites it.
 
 ### SCHEDULE_EXACT_ALARM permission
 - On Android 13+ with apps targeting SDK 33+, `SCHEDULE_EXACT_ALARM` is **not** auto-granted at install (unlike API 31-32 where it was). Calling `setExactAndAllowWhileIdle` without it throws `SecurityException`, which silently kills the scheduling coroutine — the emitter is saved to DB but no alarm is ever set. Symptom: emitters show "Daily · Now" forever, no tasks emitted.
