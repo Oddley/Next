@@ -390,8 +390,7 @@ private fun SectionedList(
                             label = label,
                             rrule = rrule,
                             dtStart = dtStart,
-                            // recompute nextEmission — EmitterRepository handles this
-                            // when the caller calls updateEmitter; pass current for now
+                            // nextEmission recomputed in EmitterRepository.updateEmitter
                             nextEmission = editing.nextEmission,
                         )
                     )

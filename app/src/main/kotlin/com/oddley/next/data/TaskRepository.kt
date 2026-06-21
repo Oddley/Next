@@ -11,6 +11,7 @@ import com.oddley.next.domain.task.editText
 import com.oddley.next.domain.task.nextOrderForInsert
 import com.oddley.next.domain.task.reorder
 import com.oddley.next.domain.task.restore
+import com.oddley.next.domain.task.bumpToBottom
 import com.oddley.next.domain.task.snoozeTask
 import com.oddley.next.domain.task.unsnoozeTask
 import kotlinx.coroutines.flow.Flow
@@ -124,6 +125,16 @@ class TaskRepository(private val dao: TaskDao) {
     suspend fun unsnoozeTask(id: Long) {
         val task = dao.getAllOnce().map { it.toDomain() }.firstOrNull { it.id == id } ?: return
         dao.update(unsnoozeTask(task).toEntity())
+    }
+
+    /** Moves the task with [id] to the bottom of the active section. No-op if not found. */
+    suspend fun bumpToBottom(id: Long) {
+        val current = dao.getAllOnce().map { it.toDomain() }
+        val updated = bumpToBottom(current, id)
+        val changed = updated.filter { task ->
+            current.first { it.id == task.id }.order != task.order
+        }
+        if (changed.isNotEmpty()) dao.updateAll(changed.map { it.toEntity() })
     }
 
     /**

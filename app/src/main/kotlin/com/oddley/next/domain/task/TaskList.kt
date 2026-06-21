@@ -133,3 +133,14 @@ fun snoozeTask(task: Task, until: Long): Task = task.copy(snoozedUntil = until)
 
 /** Returns a copy of [task] with [snoozedUntil] cleared. */
 fun unsnoozeTask(task: Task): Task = task.copy(snoozedUntil = null)
+
+/**
+ * Moves [id] to the bottom of the active section by giving it an order value
+ * higher than all other active tasks. No-op if [id] is not an active task.
+ */
+fun bumpToBottom(tasks: List<Task>, id: Long): List<Task> {
+    val active = activeTasks(tasks)
+    if (active.none { it.id == id }) return tasks
+    val newOrder = active.maxOf { it.order } + 1000
+    return tasks.map { if (it.id == id) it.copy(order = newOrder) else it }
+}

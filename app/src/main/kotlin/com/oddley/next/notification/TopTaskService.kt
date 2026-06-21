@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.oddley.next.MainActivity
@@ -58,6 +59,7 @@ class TopTaskService : Service() {
         startForeground(
             NOTIFICATION_ID,
             lastNotification ?: buildNotification(this, NullTask),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
         if (!observing) {
             observing = true
@@ -82,7 +84,10 @@ class TopTaskService : Service() {
                 lastNotification = notification
                 // Use startForeground (not just notify) so the notification stays
                 // bound to the foreground service declaration on every update.
-                startForeground(NOTIFICATION_ID, notification)
+                startForeground(
+                    NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
             }
         }
     }
@@ -94,6 +99,7 @@ class TopTaskService : Service() {
         const val NOTIFICATION_ID = 1
         const val ACTION_MARK_COMPLETE = "com.oddley.next.MARK_COMPLETE"
         const val ACTION_SNOOZE = "com.oddley.next.SNOOZE"
+        const val ACTION_BUMP = "com.oddley.next.BUMP"
         const val ACTION_NOTIFICATION_DISMISSED = "com.oddley.next.NOTIFICATION_DISMISSED"
 
         fun start(context: Context) {
@@ -153,6 +159,7 @@ class TopTaskService : Service() {
             if (top != NullTask) {
                 builder.addAction(0, "Mark complete", pendingBroadcast(context, ACTION_MARK_COMPLETE, 1))
                 builder.addAction(0, "Snooze", pendingBroadcast(context, ACTION_SNOOZE, 2))
+                builder.addAction(0, "Bump", pendingBroadcast(context, ACTION_BUMP, 3))
             }
 
             return builder.build()

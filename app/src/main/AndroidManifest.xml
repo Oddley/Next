@@ -61,6 +61,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Notification action: Bump to bottom -->
+        <receiver
+            android:name=".notification.BumpReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.oddley.next.BUMP" />
+            </intent-filter>
+        </receiver>
+
         <!-- Boot receiver: restart service after device reboot -->
         <receiver
             android:name=".notification.BootReceiver"

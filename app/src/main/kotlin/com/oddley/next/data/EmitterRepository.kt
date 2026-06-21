@@ -9,6 +9,8 @@ import com.oddley.next.domain.task.activeTasks
 import com.oddley.next.domain.task.orderForTopInsert
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Single source of truth for Task Emitter data.
@@ -22,6 +24,8 @@ class EmitterRepository(
     private val dao: EmitterDao,
     private val taskDao: TaskDao,
 ) {
+
+    private val emissionMutex = Mutex()
 
     val emitters: Flow<List<TaskEmitter>> = dao.observeAll().map { list ->
         list.map { it.toDomain() }
@@ -46,7 +50,12 @@ class EmitterRepository(
     }
 
     suspend fun updateEmitter(emitter: TaskEmitter) {
-        dao.update(emitter.toEntity())
+        // Recompute nextEmission so the edited schedule takes effect immediately.
+        val now = System.currentTimeMillis()
+        val updated = emitter.copy(
+            nextEmission = computeNextEmission(emitter.rrule, emitter.dtStart, now),
+        )
+        dao.update(updated.toEntity())
     }
 
     suspend fun deleteEmitter(id: Long) {
@@ -76,7 +85,7 @@ class EmitterRepository(
      *
      * Returns true if at least one emitter fired (so the caller can reschedule).
      */
-    suspend fun processEmissions(now: Long): Boolean {
+    suspend fun processEmissions(now: Long): Boolean = emissionMutex.withLock {
         val emitters = dao.getAllOnce().map { it.toDomain() }
         val due = emitters.filter { shouldEmit(it, now) }
         Log.d("EmitterRepository", "processEmissions: ${emitters.size} emitters, ${due.size} due at $now")
@@ -120,6 +129,6 @@ class EmitterRepository(
             dao.update(advanced.toEntity())
         }
 
-        return true
+        true
     }
 }
