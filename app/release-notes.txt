@@ -1,7 +1,7 @@
-Bug fixes and a new Bump action.
+Fix for the crash loop coming back.
 
-- Fixed: app crashing repeatedly on newer Android versions (Android 14+).
-- Fixed: editing a scheduled task's time now updates immediately in the list.
-- Fixed: scheduled task no longer shows up twice in the list.
-- New: "Bump" button in the notification — sends the current task to the
-  bottom of the list permanently (different from Snooze, which is temporary).
+- Fixed: the "keeps stopping" crash could still happen after a few hours of
+  the app running, because Android puts a 6-hour time limit on the type of
+  background service we were using. Switched to a type with no time limit.
+- Added: if the app ever crashes again, more detail is now saved to the log
+  (use the menu -> Submit Log after a crash to help track it down).

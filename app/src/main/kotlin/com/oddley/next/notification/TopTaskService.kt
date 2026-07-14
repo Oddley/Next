@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.oddley.next.MainActivity
 import com.oddley.next.R
@@ -16,6 +18,7 @@ import com.oddley.next.app.NextApplication
 import com.oddley.next.domain.task.NullTask
 import com.oddley.next.domain.task.Task
 import com.oddley.next.domain.task.computeNext
+import com.oddley.next.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,7 +53,13 @@ class TopTaskService : Service() {
     private var observing = false
     private var lastNotification: Notification? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        AppLogger.log(this, TAG, "onCreate")
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        AppLogger.log(this, TAG, "onStartCommand startId=$startId observing=$observing")
         ensureChannel(this)
         // Re-anchor: re-call startForeground with the most recent notification we have.
         // On first start lastNotification is null → use placeholder; the Flow collector
@@ -59,7 +68,7 @@ class TopTaskService : Service() {
         startForeground(
             NOTIFICATION_ID,
             lastNotification ?: buildNotification(this, NullTask),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
         if (!observing) {
             observing = true
@@ -71,8 +80,19 @@ class TopTaskService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        AppLogger.log(this, TAG, "onDestroy")
         super.onDestroy()
         scope.cancel()
+    }
+
+    // API 34+: called if the platform decides this service must stop (e.g. a FGS type
+    // timeout). specialUse has no enforced timeout today, but this is a safety net in
+    // case that changes or another type is used again — log and stop cleanly instead
+    // of letting the system throw and crash-loop.
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        AppLogger.log(this, TAG, "onTimeout startId=$startId fgsType=$fgsType — stopping self")
+        stopSelf(startId)
     }
 
     private fun observeState() {
@@ -86,13 +106,15 @@ class TopTaskService : Service() {
                 // bound to the foreground service declaration on every update.
                 startForeground(
                     NOTIFICATION_ID, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
                 )
             }
         }
     }
 
     companion object {
+        private const val TAG = "TopTaskService"
+
         // Bumped to _v2 so Android creates a fresh channel with updated importance.
         // (Android ignores importance changes on existing channels.)
         const val CHANNEL_ID = "next_top_task_v2"

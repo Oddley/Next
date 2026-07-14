@@ -4,8 +4,11 @@
 
     <!-- Foreground service (needed on all versions) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- dataSync type required for foreground service on Android 14+ -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- specialUse type: this service shows an indefinite persistent status notification,
+         not a finite sync job. dataSync was tried first but Android 15+ (targetSdk 35+)
+         imposes a 6-hour cumulative runtime cap on dataSync FGS, which crash-loops a
+         service meant to run 24/7 (see issue #10 recurrence). specialUse has no such cap. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Notification permission required on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Boot receiver: restart service after reboot -->
@@ -37,11 +40,17 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground service: shows the persistent current-top-task notification -->
+        <!-- Foreground service: shows the persistent current-top-task notification.
+             specialUse (not dataSync) because this runs indefinitely, 24/7 -
+             dataSync is subject to a 6-hour timeout on Android 15+. -->
         <service
             android:name=".notification.TopTaskService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Persistent current-task reminder notification" />
+        </service>
 
         <!-- Notification action: Mark complete -->
         <receiver
